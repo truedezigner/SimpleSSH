@@ -1,9 +1,12 @@
-# Connections & Credentials
+﻿# Connections & Credentials
 
 ## Connection Metadata (JSON)
-Stored in the app data directory (e.g., `%APPDATA%/SFTPSync` on Windows, `~/Library/Application Support` on macOS).
+Stored in the app data directory:
+- Windows: %APPDATA%\SimpleSSH\connections.json
+- macOS: ~/Library/Application Support/SimpleSSH/connections.json
 
-```json
+Example:
+```
 [
   {
     "id": "conn_abc123",
@@ -11,7 +14,8 @@ Stored in the app data directory (e.g., `%APPDATA%/SFTPSync` on Windows, `~/Libr
     "host": "server.namehero.net",
     "port": 22,
     "username": "cpaneluser",
-    "authType": "password",
+    "authType": "key",
+    "keyName": "alca",
     "remoteRoot": "/home/cpaneluser/public_html",
     "localRoot": "C:\\Users\\you\\SFTPSync\\SiteA",
     "verifyMode": "sha256-remote",
@@ -21,19 +25,27 @@ Stored in the app data directory (e.g., `%APPDATA%/SFTPSync` on Windows, `~/Libr
 ```
 
 ## Secrets (Passwords & Passphrases)
-Passwords are stored in the OS keychain via `keytar` and are never written to JSON. The UI can show the password by reading it from the keychain.
+Passwords and private keys are stored in the OS keychain via keytar and are
+never written to JSON.
 
-**Key naming convention**
-- Service: `sftp-sync`
-- Account: `conn:<id>:password`
+Key naming convention:
+- Service: sftp-sync
+- Account: conn:<id>:password
+- Account: conn:<id>:privateKey
+- Account: conn:<id>:passphrase
 
 ## Test Connection Flow
 1. Open SSH session.
 2. Open SFTP subsystem.
-3. `readdir(remoteRoot)` (or `stat`) to verify access.
+3. readdir(remoteRoot) to verify access.
 4. Return success or error with a user-friendly message.
 
-## Recommended Defaults for NameHero/cPanel
+## Import / Export
+- Export writes connections metadata to a JSON file.
+- Import reads JSON and upserts each connection.
+- Passwords are not exported or imported.
+
+## Recommended Defaults (NameHero / cPanel)
 - SSH/SFTP enabled in cPanel.
-- Default remote root: `/home/<user>/public_html`.
-- Verification mode: `sha256-remote`, fallback to download-back if remote hashing fails.
+- Default remote root: /home/<user>/public_html.
+- Verify mode default: sha256-remote, fallback to download-back.

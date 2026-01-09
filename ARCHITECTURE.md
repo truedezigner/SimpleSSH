@@ -1,48 +1,55 @@
-# Architecture Overview
+﻿# SimpleSSH Architecture
 
 ## High-Level Design
-The app uses Electron with a React + TypeScript renderer and a Node-powered main process. The main process owns SFTP/SSH connections, file watching, and transfer logic. The renderer provides UI for connections, browsing, and transfer status.
+SimpleSSH is an Electron app with a React + TypeScript renderer and a Node-powered
+main process. The main process owns SSH/SFTP connections, secrets, and workspace
+sync. The renderer provides connection management UI, workspace overview, and
+status feedback.
 
 ```
 Renderer (React UI)
-  ├─ Connections list + editor
-  ├─ Workspace file browser
-  └─ Transfer queue and status
-        ↑ IPC
+  - Connections list + editor
+  - Workspace summary + file tree preview
+  - Status and actions (test, sync, refresh)
+        |
+        +-- IPC
 Main (Electron/Node)
-  ├─ Connections store (JSON)
-  ├─ Secrets store (Keychain via keytar)
-  ├─ SSH + SFTP client (ssh2)
-  ├─ Sync engine (upload/download)
-  ├─ Watcher (chokidar)
-  └─ Verification (size + hash)
+  - Connections store (JSON)
+  - Secrets store (keytar)
+  - SSH + SFTP client (ssh2)
+  - Workspace sync (remote -> local)
+  - Remote browser (lazy SFTP list + download)
+  - Local file tree scan
 ```
 
 ## Responsibilities
 
 ### Main Process
-- Establish SSH and SFTP connections.
+- Store connection metadata in a JSON file under app userData.
+- Store secrets (passwords/private keys) in OS keychain via keytar.
 - Provide IPC handlers for:
-  - Connection CRUD and password access.
-  - Test connection.
-  - Open workspace (initial download + watcher start).
-  - Transfer queue operations.
-- Manage file watchers and debounce/coalesce saves.
-- Perform upload verification (size + SHA-256).
+  - Connection CRUD + password access.
+  - Test connection (SSH + SFTP readdir).
+  - Workspace selection, sync, remote list/download, and local tree scan.
+  - Import/export connections (metadata only).
 
 ### Renderer
-- Connection list and editor (including “show password”).
-- Workspace file browser (tree + list).
-- Context menu actions (open in VS Code, reveal in OS, copy paths).
-- Transfer queue UI with states and errors.
+- List, add, edit, and delete connections.
+- Validate inputs and auto-derive remote root from username.
+- Pick a local workspace folder.
+- Trigger remote sync and refresh local tree preview.
+- Show status for test and sync operations.
 
-## Key Modules (Planned)
-- `main/sshClient.ts`: SSH connect + SFTP + exec wrappers.
-- `main/connectionsStore.ts`: JSON metadata storage.
-- `main/secretsStore.ts`: keytar wrappers for passwords.
-- `main/sync/queue.ts`: p-queue transfer scheduling.
-- `main/sync/watcher.ts`: chokidar watcher and event normalization.
-- `main/sync/verify.ts`: local + remote hash logic.
-- `renderer/views/ConnectionsView.tsx`: connections UI.
-- `renderer/views/FileBrowserView.tsx`: local file browser.
-- `renderer/views/TransfersView.tsx`: queue status UI.
+## Key Modules (Current)
+- `electron/main/connectionsStore.ts`: JSON metadata storage.
+- `electron/main/secretsStore.ts`: keytar wrappers for passwords.
+- `electron/main/sshClient.ts`: SSH connect + SFTP readdir for testing.
+- `electron/main/workspace.ts`: remote browser + download + local tree scan.
+- `electron/main/uploader.ts`: watcher + upload queue (local -> remote).
+- `electron/main/ipc.ts`: IPC handlers.
+- `electron/preload/index.ts`: secure API exposed to renderer.
+- `src/App.tsx`: connections UI, workspace preview, actions.
+
+## Gaps / Not Implemented Yet
+- Transfer queue UI.
+- Remote -> local sync is implemented; local -> remote sync is not.

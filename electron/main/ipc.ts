@@ -1,0 +1,398 @@
+import { ipcMain, dialog, BrowserWindow, shell, Menu, clipboard } from 'electron'
+import { deleteConnection, listConnections, upsertConnection } from './connectionsStore'
+import {
+  deletePassphrase,
+  deletePassword,
+  deletePrivateKey,
+  getPassphrase,
+  getPassword,
+  getPrivateKey,
+  setPassphrase,
+  setPassword,
+  setPrivateKey,
+} from './secretsStore'
+import { testConnection } from './sshClient'
+import { downloadRemoteFile, listLocalTree, listRemoteDir, syncRemoteToLocal } from './workspace'
+import { getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
+import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+import os from 'node:os'
+import { execFile } from 'node:child_process'
+
+function revealLabel() {
+  return process.platform === 'darwin' ? 'Reveal in Finder' : 'Reveal in Explorer'
+}
+
+export function registerIpcHandlers() {
+  setQueueStatusEmitter((status) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('workspace:queueStatus', status)
+    }
+  })
+
+  ipcMain.handle('connections:list', async () => {
+    return listConnections()
+  })
+
+  ipcMain.handle(
+    'connections:upsert',
+    async (_event, payload: { connection: any; password?: string; privateKey?: string; passphrase?: string }) => {
+      const { connection, password, privateKey, passphrase } = payload
+    const saved = await upsertConnection(connection)
+      if (saved.authType === 'password') {
+        if (password) {
+          await setPassword(saved.id, password)
+        }
+        await deletePrivateKey(saved.id)
+        await deletePassphrase(saved.id)
+      } else {
+        if (privateKey) {
+          await setPrivateKey(saved.id, privateKey)
+        }
+        if (passphrase) {
+          await setPassphrase(saved.id, passphrase)
+        } else {
+          await deletePassphrase(saved.id)
+        }
+        await deletePassword(saved.id)
+      }
+      return saved
+    },
+  )
+
+  ipcMain.handle('connections:delete', async (_event, id: string) => {
+    await deletePassword(id)
+    await deletePrivateKey(id)
+    await deletePassphrase(id)
+    return deleteConnection(id)
+  })
+
+  ipcMain.handle('connections:getPassword', async (_event, id: string) => {
+    return getPassword(id)
+  })
+
+  ipcMain.handle('connections:clearPassword', async (_event, id: string) => {
+    await deletePassword(id)
+    return true
+  })
+
+  ipcMain.handle('connections:getPrivateKey', async (_event, id: string) => {
+    return getPrivateKey(id)
+  })
+
+  ipcMain.handle('connections:clearPrivateKey', async (_event, id: string) => {
+    await deletePrivateKey(id)
+    return true
+  })
+
+  ipcMain.handle('connections:getPassphrase', async (_event, id: string) => {
+    return getPassphrase(id)
+  })
+
+  ipcMain.handle('connections:clearPassphrase', async (_event, id: string) => {
+    await deletePassphrase(id)
+    return true
+  })
+
+  ipcMain.handle('connections:test', async (_event, payload: any) => {
+    return testConnection(payload)
+  })
+
+  ipcMain.handle(
+    'connections:generateKeyPair',
+    async (_event, payload: { keyName: string; passphrase: string; comment?: string }) => {
+      const keyName = payload.keyName?.trim()
+      const passphrase = payload.passphrase ?? ''
+      if (!keyName) return { ok: false, message: 'Key name is required.' }
+      if (!passphrase) return { ok: false, message: 'Key passphrase is required.' }
+      if (/[\\/]/.test(keyName)) return { ok: false, message: 'Key name cannot include slashes.' }
+
+      const sshDir = path.join(os.homedir(), '.ssh')
+      const keyPath = path.join(sshDir, keyName)
+      const pubPath = `${keyPath}.pub`
+
+      if (fsSync.existsSync(keyPath) || fsSync.existsSync(pubPath)) {
+        return { ok: false, message: 'Key already exists in .ssh.' }
+      }
+
+      try {
+        await fs.mkdir(sshDir, { recursive: true })
+        const args = ['-t', 'rsa', '-b', '2048', '-f', keyPath, '-N', passphrase]
+        if (payload.comment?.trim()) {
+          args.push('-C', payload.comment.trim())
+        }
+        await new Promise<void>((resolve, reject) => {
+          execFile('ssh-keygen', args, (err) => {
+            if (err) reject(err)
+            else resolve()
+          })
+        })
+        const [privateKey, publicKey] = await Promise.all([
+          fs.readFile(keyPath, 'utf8'),
+          fs.readFile(pubPath, 'utf8'),
+        ])
+        return {
+          ok: true,
+          message: 'Key pair generated.',
+          privateKey,
+          publicKey,
+          keyPath,
+          publicKeyPath: pubPath,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to generate key pair.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle('connections:export', async () => {
+    const connections = await listConnections()
+    const target = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow() ?? undefined, {
+      title: 'Export Connections',
+      defaultPath: path.join(process.cwd(), 'simplessh-connections.json'),
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (target.canceled || !target.filePath) return { ok: false, message: 'Export cancelled.' }
+    await fs.writeFile(target.filePath, JSON.stringify(connections, null, 2), 'utf8')
+    return { ok: true, message: 'Connections exported.' }
+  })
+
+  ipcMain.handle('connections:import', async () => {
+    const source = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() ?? undefined, {
+      title: 'Import Connections',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    })
+    if (source.canceled || source.filePaths.length === 0) {
+      return { ok: false, message: 'Import cancelled.' }
+    }
+    const raw = await fs.readFile(source.filePaths[0], 'utf8')
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return { ok: false, message: 'Invalid connections file.' }
+    }
+    for (const item of parsed) {
+      await upsertConnection(item)
+    }
+    return { ok: true, message: 'Connections imported.' }
+  })
+
+  ipcMain.handle('workspace:pickFolder', async () => {
+    const result = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() ?? undefined, {
+      title: 'Select Local Workspace',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('workspace:list', async (_event, payload: { root: string; depth?: number }) => {
+    return listLocalTree(payload.root, payload.depth ?? 2)
+  })
+
+  ipcMain.handle('workspace:openFolder', async (_event, payload: { root: string }) => {
+    if (!payload.root) return { ok: false, message: 'No folder path provided.' }
+    try {
+      await fs.mkdir(payload.root, { recursive: true })
+      const result = await shell.openPath(payload.root)
+      if (result) return { ok: false, message: result }
+      return { ok: true, message: 'Opened workspace folder.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to open folder.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle('workspace:sync', async (_event, payload: { connectionId: string }) => {
+    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+    if (!connection) return { ok: false, message: 'Connection not found.' }
+    if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+    const authType = connection.authType ?? 'password'
+    if (authType === 'password') {
+      const password = await getPassword(connection.id)
+      if (!password) return { ok: false, message: 'Missing password.' }
+      auth = { password }
+    } else {
+      const privateKey = await getPrivateKey(connection.id)
+      const passphrase = await getPassphrase(connection.id)
+      if (!privateKey) return { ok: false, message: 'Missing private key.' }
+      auth = { privateKey, passphrase: passphrase ?? undefined }
+    }
+    try {
+      await syncRemoteToLocal(connection, auth)
+      return { ok: true, message: 'Workspace synced.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sync failed.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle('workspace:remoteList', async (_event, payload: { connectionId: string; path: string }) => {
+    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+    if (!connection) return { ok: false, message: 'Connection not found.' }
+    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+    const authType = connection.authType ?? 'password'
+    if (authType === 'password') {
+      const password = await getPassword(connection.id)
+      if (!password) return { ok: false, message: 'Missing password.' }
+      auth = { password }
+    } else {
+      const privateKey = await getPrivateKey(connection.id)
+      const passphrase = await getPassphrase(connection.id)
+      if (!privateKey) return { ok: false, message: 'Missing private key.' }
+      auth = { privateKey, passphrase: passphrase ?? undefined }
+    }
+    try {
+      const nodes = await listRemoteDir(connection, auth, payload.path || connection.remoteRoot)
+      return { ok: true, message: 'Remote list loaded.', nodes }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load remote list.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle(
+    'workspace:downloadRemoteFile',
+    async (_event, payload: { connectionId: string; remotePath: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        const localPath = await downloadRemoteFile(connection, auth, payload.remotePath)
+        return { ok: true, message: 'File downloaded.', localPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to download file.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle('workspace:startWatch', async (_event, payload: { connectionId: string }) => {
+    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+    if (!connection) return { ok: false, message: 'Connection not found.' }
+    if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+    const authType = connection.authType ?? 'password'
+    if (authType === 'password') {
+      const password = await getPassword(connection.id)
+      if (!password) return { ok: false, message: 'Missing password.' }
+      auth = { password }
+    } else {
+      const privateKey = await getPrivateKey(connection.id)
+      const passphrase = await getPassphrase(connection.id)
+      if (!privateKey) return { ok: false, message: 'Missing private key.' }
+      auth = { privateKey, passphrase: passphrase ?? undefined }
+    }
+    try {
+      const status = await startWatcher(connection, auth)
+      return { ok: true, message: 'Watcher started.', status }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start watcher.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle('workspace:stopWatch', async (_event, payload: { connectionId: string }) => {
+    try {
+      const status = await stopWatcher(payload.connectionId)
+      if (!status) return { ok: false, message: 'Watcher not running.' }
+      return { ok: true, message: 'Watcher stopped.', status }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop watcher.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle('workspace:getQueueStatus', async (_event, payload: { connectionId: string }) => {
+    return getQueueStatus(payload.connectionId)
+  })
+
+  ipcMain.handle(
+    'workspace:openInEditor',
+    async (_event, payload: { path: string; codeCommand?: string }) => {
+      if (!payload?.path) return { ok: false, message: 'No path provided.' }
+      const codeCommand = payload.codeCommand?.trim() || 'code'
+      try {
+        const safePath = payload.path.replace(/\"/g, '\\"')
+        const child = spawn(`${codeCommand} \"${safePath}\"`, {
+          detached: true,
+          stdio: 'ignore',
+          shell: true,
+        })
+        child.unref()
+        return { ok: true, message: 'Opened in editor.' }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to open editor.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:showContextMenu',
+    async (event, payload: { path: string; type: 'file' | 'dir'; codeCommand?: string }) => {
+      if (!payload?.path) return { ok: false, message: 'No path provided.' }
+      const codeCommand = payload.codeCommand?.trim() || 'code'
+      const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const template = [
+        {
+          label: `Open in ${codeCommand}`,
+          click: () => {
+            try {
+              const safePath = payload.path.replace(/"/g, '\\"')
+              const child = spawn(`${codeCommand} "${safePath}"`, {
+                detached: true,
+                stdio: 'ignore',
+                shell: true,
+              })
+              child.unref()
+            } catch {
+              // ignore spawn errors; we only trigger the command
+            }
+          },
+        },
+        payload.type === 'dir'
+          ? {
+              label: 'Open Folder',
+              click: () => {
+                void shell.openPath(payload.path)
+              },
+            }
+          : {
+              label: revealLabel(),
+              click: () => {
+                shell.showItemInFolder(payload.path)
+              },
+            },
+        {
+          label: 'Copy Path',
+          click: () => clipboard.writeText(payload.path),
+        },
+      ]
+
+      const menu = Menu.buildFromTemplate(template)
+      menu.popup({ window })
+      return { ok: true, message: 'Menu opened.' }
+    },
+  )
+}
