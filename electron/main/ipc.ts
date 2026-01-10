@@ -12,7 +12,7 @@ import {
   setPrivateKey,
 } from './secretsStore'
 import { testConnection } from './sshClient'
-import { downloadRemoteFile, listLocalTree, listRemoteDir, syncRemoteToLocal } from './workspace'
+import { downloadRemoteFile, listLocalTree, listRemoteDir, rebuildRemoteIndex, syncRemoteToLocal } from './workspace'
 import { forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
@@ -261,6 +261,59 @@ export function registerIpcHandlers() {
     }
   },
   )
+
+  ipcMain.handle('workspace:rebuildRemoteIndex', async (_event, payload: { connectionId: string }) => {
+    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+    if (!connection) return { ok: false, message: 'Connection not found.' }
+    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+    const authType = connection.authType ?? 'password'
+    if (authType === 'password') {
+      const password = await getPassword(connection.id)
+      if (!password) return { ok: false, message: 'Missing password.' }
+      auth = { password }
+    } else {
+      const privateKey = await getPrivateKey(connection.id)
+      const passphrase = await getPassphrase(connection.id)
+      if (!privateKey) return { ok: false, message: 'Missing private key.' }
+      auth = { privateKey, passphrase: passphrase ?? undefined }
+    }
+    try {
+      const toRelative = (value: string) => {
+        const relative = path.posix.relative(connection.remoteRoot, value)
+        if (!relative || relative === '.') return '.'
+        if (relative.startsWith('..')) return value
+        return relative
+      }
+      const notify = (message: string) => {
+        console.log(`[remote-index] ${message}`)
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send('workspace:status', {
+            connectionId: connection.id,
+            kind: 'info',
+            message,
+          })
+        }
+      }
+      notify('Rebuilding remote index: .')
+      await rebuildRemoteIndex(connection, auth, {
+        onProgress: (targetPath) => {
+          notify(`Rebuilding remote index: ${toRelative(targetPath)}`)
+        },
+        onEmpty: (targetPath) => {
+          notify(`Rebuilding remote index: ${toRelative(targetPath)} (empty)`)
+        },
+        onError: (targetPath, error) => {
+          const detail = error instanceof Error ? error.message : 'unknown error'
+          notify(`Rebuilding remote index: failed to list ${toRelative(targetPath)} (${detail})`)
+        },
+      })
+      return { ok: true, message: 'Remote index rebuilt.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to rebuild remote index.'
+      return { ok: false, message }
+    }
+  })
 
   ipcMain.handle(
     'workspace:downloadRemoteFile',

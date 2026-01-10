@@ -27,6 +27,7 @@ interface Window {
         path: string
         force?: boolean
       }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
+      rebuildRemoteIndex: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       stopWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
@@ -34,6 +35,7 @@ interface Window {
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void
+      onStatus: (handler: (status: unknown) => void) => () => void
       showContextMenu: (payload: {
         connectionId?: string
         path: string

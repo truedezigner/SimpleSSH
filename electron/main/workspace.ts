@@ -27,6 +27,19 @@ const remotePinned = new Set<string>()
 const remoteIndexState = new Map<string, Promise<void>>()
 const remoteIndexedConnections = new Set<string>()
 
+function clearRemoteCache(connection: Connection) {
+  const prefix = `${connection.id}:`
+  for (const key of remoteCache.keys()) {
+    if (key.startsWith(prefix)) remoteCache.delete(key)
+  }
+  for (const key of remoteAccessCounts.keys()) {
+    if (key.startsWith(prefix)) remoteAccessCounts.delete(key)
+  }
+  for (const key of remotePinned) {
+    if (key.startsWith(prefix)) remotePinned.delete(key)
+  }
+}
+
 export async function listLocalTree(root: string, depth = 2): Promise<FileNode[]> {
   if (!root) return []
   try {
@@ -200,7 +213,16 @@ async function fetchRemoteDir(
 async function indexRemoteTree(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
+  options?: {
+    onProgress?: (path: string) => void
+    onEmpty?: (path: string) => void
+    onError?: (path: string, error: unknown) => void
+  },
 ) {
+  const shouldLog = Boolean(options?.onProgress || options?.onEmpty || options?.onError)
+  if (shouldLog) {
+    console.log(`[remote-index] indexing ${connection.remoteRoot}`)
+  }
   const connectionKey = connection.id
   if (remoteIndexedConnections.has(connectionKey)) return
   if (remoteIndexState.has(connectionKey)) return
@@ -210,7 +232,14 @@ async function indexRemoteTree(
       const current = queue.shift()
       if (!current) continue
       try {
+        options?.onProgress?.(current)
         const entries = await readDir(sftp, current)
+        if (shouldLog) {
+          console.log(`[remote-index] listed ${current} (${entries.length})`)
+        }
+        if (entries.length === 0) {
+          options?.onEmpty?.(current)
+        }
         const nodes = entries.map((entry) => ({
           name: entry.filename,
           path: remoteJoin(current, entry.filename),
@@ -219,11 +248,18 @@ async function indexRemoteTree(
         })) as FileNode[]
         setCachedDir(connection, current, nodes)
         for (const entry of entries) {
+          const entryPath = remoteJoin(current, entry.filename)
+          options?.onProgress?.(entryPath)
           if (entry.attrs.isDirectory()) {
-            queue.push(remoteJoin(current, entry.filename))
+            queue.push(entryPath)
           }
         }
-      } catch {
+      } catch (error) {
+        if (shouldLog) {
+          const detail = error instanceof Error ? error.message : 'unknown error'
+          console.log(`[remote-index] error ${current} (${detail})`)
+        }
+        options?.onError?.(current, error)
         // skip paths that fail during initial index
       }
     }
@@ -237,6 +273,55 @@ async function indexRemoteTree(
     })
   remoteIndexState.set(connectionKey, run)
   await run
+}
+
+export async function rebuildRemoteIndex(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  options?: {
+    onProgress?: (path: string) => void
+    onEmpty?: (path: string) => void
+    onError?: (path: string, error: unknown) => void
+  },
+) {
+  const shouldLog = Boolean(options?.onProgress || options?.onEmpty || options?.onError)
+  if (shouldLog) {
+    console.log(`[remote-index] rebuild start ${connection.id}`)
+  }
+  const connectionKey = connection.id
+  const current = remoteIndexState.get(connectionKey)
+  if (current) {
+    if (shouldLog) {
+      console.log(`[remote-index] waiting on existing index ${connectionKey}`)
+    }
+    let timedOut = false
+    try {
+      await Promise.race([
+        current.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            timedOut = true
+            resolve()
+          }, 2000)
+        }),
+      ])
+    } catch {
+      // ignore prior index errors
+    }
+    if (timedOut && shouldLog) {
+      console.log(`[remote-index] existing index timeout, forcing rebuild ${connectionKey}`)
+    }
+  }
+  remoteIndexState.delete(connectionKey)
+  remoteIndexedConnections.delete(connectionKey)
+  clearRemoteCache(connection)
+  if (shouldLog) {
+    console.log(`[remote-index] starting fresh index ${connection.remoteRoot}`)
+  }
+  await indexRemoteTree(connection, auth, options)
+  if (shouldLog) {
+    console.log(`[remote-index] rebuild complete ${connection.id}`)
+  }
 }
 
 

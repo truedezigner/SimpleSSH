@@ -1,5 +1,5 @@
-﻿
-import { useEffect, useMemo, useState, type UIEvent } from 'react'
+
+import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react'
 import './App.css'
 
 type VerifyMode = 'sha256-remote' | 'download-back'
@@ -189,8 +189,7 @@ function App() {
   const [password, setPassword] = useState('')
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
-  const [connectionStatus, setConnectionStatus] = useState<StatusMessage | null>(null)
-  const [workspaceStatus, setWorkspaceStatus] = useState<StatusMessage | null>(null)
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null)
 
   const [queueStatusMap, setQueueStatusMap] = useState<Record<string, QueueStatus>>({})
 
@@ -214,16 +213,47 @@ function App() {
     return queueStatus.recent.filter((item) => item.note?.toLowerCase().includes('remote won'))
   }, [queueStatus])
 
+  const activeConnectionIdRef = useRef<string | null>(null)
+  const connectionDraftIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    activeConnectionIdRef.current = activeConnectionId
+  }, [activeConnectionId])
+
+  useEffect(() => {
+    connectionDraftIdRef.current = connectionDraft.id ?? null
+  }, [connectionDraft.id])
+
   useEffect(() => {
     const unsubscribe = window.simpleSSH.workspace.onQueueStatus((status) => {
       if (!isQueueStatus(status)) return
       setQueueStatusMap((prev) => ({ ...prev, [status.connectionId]: status }))
     })
 
+    const unsubscribeStatus = window.simpleSSH.workspace.onStatus((status) => {
+      if (!status || typeof status !== 'object') return
+      const update = status as { connectionId?: string; kind?: StatusKind; message?: string }
+      if (!update.message) return
+      const currentConnectionId = activeConnectionIdRef.current
+      const draftConnectionId = connectionDraftIdRef.current
+      if (
+        update.connectionId &&
+        currentConnectionId &&
+        draftConnectionId &&
+        update.connectionId !== currentConnectionId &&
+        update.connectionId !== draftConnectionId
+      ) {
+        return
+      }
+      const kind = update.kind === 'ok' || update.kind === 'error' || update.kind === 'info' ? update.kind : 'info'
+      setStatusMessage({ kind, message: update.message })
+    })
+
     void loadConnections()
 
     return () => {
       unsubscribe()
+      unsubscribeStatus()
     }
   }, [])
 
@@ -282,7 +312,7 @@ function App() {
   const openEditor = async (connection?: Connection) => {
     setEditorOpen(true)
     setConnectionErrors({})
-    setConnectionStatus(null)
+    setStatusMessage(null)
     if (connection) {
       setConnectionDraft({ ...connection })
       if (connection.authType === 'password') {
@@ -330,7 +360,7 @@ function App() {
     const errors = validateDraft()
     setConnectionErrors(errors)
     if (Object.keys(errors).length > 0) {
-      setConnectionStatus({ kind: 'error', message: 'Fix the highlighted fields first.' })
+      setStatusMessage({ kind: 'error', message: 'Fix the highlighted fields first.' })
       return
     }
 
@@ -349,12 +379,12 @@ function App() {
     if (result && typeof result === 'object' && 'id' in result) {
       await loadConnections()
       setActiveConnectionId((result as Connection).id)
-      setConnectionStatus({ kind: 'ok', message: 'Connection saved.' })
+      setStatusMessage({ kind: 'ok', message: 'Connection saved.' })
       if (queueStatusMap[(result as Connection).id]?.watching) {
         await window.simpleSSH.workspace.startWatch({ connectionId: (result as Connection).id })
       }
     } else {
-      setConnectionStatus({ kind: 'error', message: 'Failed to save connection.' })
+      setStatusMessage({ kind: 'error', message: 'Failed to save connection.' })
     }
   }
 
@@ -363,11 +393,11 @@ function App() {
     await window.simpleSSH.connections.delete(connectionDraft.id)
     await loadConnections()
     setEditorOpen(false)
-    setConnectionStatus({ kind: 'ok', message: 'Connection deleted.' })
+    setStatusMessage({ kind: 'ok', message: 'Connection deleted.' })
   }
 
   const handleTestConnection = async () => {
-    setConnectionStatus({ kind: 'info', message: 'Testing connection...' })
+    setStatusMessage({ kind: 'info', message: 'Testing connection...' })
     const payload: ConnectionDraft = {
       ...connectionDraft,
       liveSyncIntervalSec: Number(connectionDraft.liveSyncIntervalSec),
@@ -380,63 +410,77 @@ function App() {
       passphrase: connectionDraft.authType === 'key' ? passphrase : undefined,
     })
     if (response?.ok) {
-      setConnectionStatus({ kind: 'ok', message: response.message || 'Connection ok.' })
+      setStatusMessage({ kind: 'ok', message: response.message || 'Connection ok.' })
     } else {
-      setConnectionStatus({ kind: 'error', message: response?.message || 'Connection failed.' })
+      setStatusMessage({ kind: 'error', message: response?.message || 'Connection failed.' })
+    }
+  }
+
+  const handleRebuildRemoteIndex = async () => {
+    if (!connectionDraft.id) {
+      setStatusMessage({ kind: 'error', message: 'Save the connection before rebuilding the index.' })
+      return
+    }
+    setStatusMessage({ kind: 'info', message: 'Rebuilding remote index: .' })
+    const result = await window.simpleSSH.workspace.rebuildRemoteIndex({ connectionId: connectionDraft.id })
+    if (result?.ok) {
+      setStatusMessage({ kind: 'ok', message: result.message || 'Remote index rebuilt.' })
+    } else {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to rebuild remote index.' })
     }
   }
 
   const handleGenerateKeyPair = async () => {
-    setConnectionStatus({ kind: 'info', message: 'Generating key pair...' })
+    setStatusMessage({ kind: 'info', message: 'Generating key pair...' })
     const response = await window.simpleSSH.connections.generateKeyPair({
       keyName: connectionDraft.keyName?.trim(),
       passphrase: passphrase,
       comment: connectionDraft.name?.trim() || undefined,
     })
     if (!response?.ok) {
-      setConnectionStatus({ kind: 'error', message: response?.message || 'Key generation failed.' })
+      setStatusMessage({ kind: 'error', message: response?.message || 'Key generation failed.' })
       return
     }
     if (response.privateKey) {
       setPrivateKey(response.privateKey)
     }
-    setConnectionStatus({ kind: 'ok', message: response.message || 'Key generated.' })
+    setStatusMessage({ kind: 'ok', message: response.message || 'Key generated.' })
   }
 
   const handleSync = async () => {
     if (!activeConnection) return
-    setWorkspaceStatus({ kind: 'info', message: 'Syncing remote to local...' })
+    setStatusMessage({ kind: 'info', message: 'Syncing remote to local...' })
     const result = await window.simpleSSH.workspace.sync({ connectionId: activeConnection.id })
     if (result?.ok) {
-      setWorkspaceStatus({ kind: 'ok', message: result.message || 'Sync complete.' })
+      setStatusMessage({ kind: 'ok', message: result.message || 'Sync complete.' })
       await loadLocalRoot(activeConnection)
     } else {
-      setWorkspaceStatus({ kind: 'error', message: result?.message || 'Sync failed.' })
+      setStatusMessage({ kind: 'error', message: result?.message || 'Sync failed.' })
     }
   }
 
   const handleToggleWatcher = async () => {
     if (!activeConnection) return
     if (activeConnection.syncMode === 'manual') {
-      setWorkspaceStatus({ kind: 'error', message: 'Sync mode is manual. Switch to upload or live.' })
+      setStatusMessage({ kind: 'error', message: 'Sync mode is manual. Switch to upload or live.' })
       return
     }
     if (queueStatus?.watching) {
       const result = await window.simpleSSH.workspace.stopWatch({ connectionId: activeConnection.id })
       if (result?.ok) {
-        setWorkspaceStatus({ kind: 'ok', message: result.message || 'Auto sync stopped.' })
+        setStatusMessage({ kind: 'ok', message: result.message || 'Auto sync stopped.' })
       } else {
-        setWorkspaceStatus({ kind: 'error', message: result?.message || 'Failed to stop auto sync.' })
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to stop auto sync.' })
       }
     } else {
       const result = await window.simpleSSH.workspace.startWatch({ connectionId: activeConnection.id })
       if (result?.ok) {
-        setWorkspaceStatus({ kind: 'ok', message: result.message || 'Auto sync started.' })
+        setStatusMessage({ kind: 'ok', message: result.message || 'Auto sync started.' })
         if (isQueueStatus(result.status)) {
           setQueueStatusMap((prev) => ({ ...prev, [activeConnection.id]: result.status }))
         }
       } else {
-        setWorkspaceStatus({ kind: 'error', message: result?.message || 'Failed to start auto sync.' })
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to start auto sync.' })
       }
     }
   }
@@ -475,9 +519,9 @@ function App() {
       remotePath: node.path,
     })
     if (result?.ok) {
-      setWorkspaceStatus({ kind: 'ok', message: 'Downloaded remote file.' })
+      setStatusMessage({ kind: 'ok', message: 'Downloaded remote file.' })
     } else {
-      setWorkspaceStatus({ kind: 'error', message: result?.message || 'Download failed.' })
+      setStatusMessage({ kind: 'error', message: result?.message || 'Download failed.' })
     }
   }
 
@@ -488,9 +532,9 @@ function App() {
       codeCommand: activeConnection.codeCommand,
     })
     if (result?.ok) {
-      setWorkspaceStatus({ kind: 'ok', message: result.message || 'Opened in editor.' })
+      setStatusMessage({ kind: 'ok', message: result.message || 'Opened in editor.' })
     } else {
-      setWorkspaceStatus({ kind: 'error', message: result?.message || 'Failed to open editor.' })
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to open editor.' })
     }
   }
 
@@ -634,7 +678,7 @@ function App() {
               aria-label='Reload workspace'
               title='Reload workspace'
             >
-              ↻
+              ?
             </button>
           </div>
         </div>
@@ -724,8 +768,8 @@ function App() {
           Queue: {queueStatus ? `${queueStatus.pending} pending, ${queueStatus.active} active` : 'Idle'}
         </div>
         <div className='status-chip'>{queueDetailLabel}</div>
-        {workspaceStatus && (
-          <div className={`status-chip ${workspaceStatus.kind}`}>{workspaceStatus.message}</div>
+        {statusMessage && (
+          <div className={`status-chip ${statusMessage.kind}`}>{statusMessage.message}</div>
         )}
       </div>
 
@@ -743,7 +787,7 @@ function App() {
               className='ghost'
               onClick={async () => {
                 const result = await window.simpleSSH.connections.import()
-                setConnectionStatus({
+                setStatusMessage({
                   kind: result?.ok ? 'ok' : 'error',
                   message: result?.message || 'Import completed.',
                 })
@@ -756,7 +800,7 @@ function App() {
               className='ghost'
               onClick={async () => {
                 const result = await window.simpleSSH.connections.export()
-                setConnectionStatus({
+                setStatusMessage({
                   kind: result?.ok ? 'ok' : 'error',
                   message: result?.message || 'Export completed.',
                 })
@@ -1078,6 +1122,13 @@ function App() {
               <button className='ghost' onClick={() => void handleTestConnection()}>
                 Test
               </button>
+              <button
+                className='ghost'
+                onClick={() => void handleRebuildRemoteIndex()}
+                disabled={!connectionDraft.id || !connectionDraft.remoteRoot}
+              >
+                Rebuild Remote Index
+              </button>
               <button className='ghost' onClick={() => setEditorOpen(false)}>
                 Close
               </button>
@@ -1088,9 +1139,6 @@ function App() {
               )}
             </div>
 
-            {connectionStatus && (
-              <div className={`status ${connectionStatus.kind}`}>{connectionStatus.message}</div>
-            )}
           </div>
         )}
         {!editorOpen && <div className='sidebar-hint'>Select a connection to edit.</div>}
@@ -1100,3 +1148,4 @@ function App() {
 }
 
 export default App
+

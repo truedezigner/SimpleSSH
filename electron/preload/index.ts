@@ -26,12 +26,19 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     sync: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:sync', payload),
     remoteList: (payload: { connectionId: string; path: string; force?: boolean }) =>
       ipcRenderer.invoke('workspace:remoteList', payload),
+    rebuildRemoteIndex: (payload: { connectionId: string }) =>
+      ipcRenderer.invoke('workspace:rebuildRemoteIndex', payload),
     downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) =>
       ipcRenderer.invoke('workspace:downloadRemoteFile', payload),
     startWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:startWatch', payload),
     stopWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:stopWatch', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
+    onStatus: (handler: (status: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: unknown) => handler(status)
+      ipcRenderer.on('workspace:status', listener)
+      return () => ipcRenderer.removeListener('workspace:status', listener)
+    },
     forceUploadFile: (payload: { connectionId: string; path: string }) =>
       ipcRenderer.invoke('workspace:forceUploadFile', payload),
     openInEditor: (payload: { path: string; codeCommand?: string }) =>

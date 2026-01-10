@@ -66,4 +66,9 @@ verification (size + hash).
 - Ensure refresh only updates the current folder cache (add/remove/update) without touching other cached paths.
 - Keep cache pinned by visit frequency and respect per-connection settings for pin thresholds and max pinned entries.
 - Add a manual "Refresh this folder" action in the remote context menu (optional UX polish).
-- Add a per-connection "Rebuild remote index" button in the connection editor.
+- Add a per-connection "Rebuild remote index" button in the connection editor. (Done)
+
+## Notes for /new
+- Implement the "Rebuild remote index" button in the connection editor and wire it to a full reindex. (Done)
+- Add "Refresh this folder" to the remote context menu, using the force reload path.
+- Convert initial index to diff-merge updates so existing cache entries are preserved.
