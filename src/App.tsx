@@ -114,13 +114,6 @@ const splitRemotePath = (value: string) => {
   return parts
 }
 
-const parentRemotePath = (value: string) => {
-  const normalized = value.replace(/\\/g, '/')
-  const lastSlash = normalized.lastIndexOf('/')
-  if (lastSlash <= 0) return normalized.startsWith('/') ? '/' : ''
-  return normalized.slice(0, lastSlash)
-}
-
 const splitLocalPath = (value: string) => {
   const normalized = value.replace(/\//g, '\\')
   return normalized.split('\\').filter(Boolean)
@@ -214,15 +207,25 @@ function App() {
   }, [queueStatus])
 
   const activeConnectionIdRef = useRef<string | null>(null)
+  const activeConnectionRef = useRef<Connection | null>(null)
   const connectionDraftIdRef = useRef<string | null>(null)
+  const remoteSelectedRef = useRef<(FileNode | null)[]>([])
 
   useEffect(() => {
     activeConnectionIdRef.current = activeConnectionId
   }, [activeConnectionId])
 
   useEffect(() => {
+    activeConnectionRef.current = activeConnection
+  }, [activeConnection])
+
+  useEffect(() => {
     connectionDraftIdRef.current = connectionDraft.id ?? null
   }, [connectionDraft.id])
+
+  useEffect(() => {
+    remoteSelectedRef.current = remoteSelected
+  }, [remoteSelected])
 
   useEffect(() => {
     const unsubscribe = window.simpleSSH.workspace.onQueueStatus((status) => {
@@ -485,21 +488,44 @@ function App() {
     }
   }
 
-  const handleRefreshCurrent = async () => {
-    if (!activeConnection) return
-    if (workspaceView === 'local') {
-      await loadLocalRoot(activeConnection)
-    } else {
-      const lastSelected = remoteSelected.filter(Boolean).slice(-1)[0]
-      const targetPath =
-        lastSelected?.type === 'dir'
-          ? lastSelected.path
-          : lastSelected?.type === 'file'
-            ? parentRemotePath(lastSelected.path) || activeConnection.remoteRoot
-            : activeConnection.remoteRoot
-      await loadRemoteRoot(activeConnection, { path: targetPath, force: true })
+  const refreshRemoteFolder = async (targetPath: string, options?: { force?: boolean }) => {
+    const connection = activeConnectionRef.current
+    if (!connection) return
+    const refreshPath = targetPath === '.' || !targetPath ? connection.remoteRoot : targetPath
+    const force = Boolean(options?.force)
+    const response = await window.simpleSSH.workspace.remoteList({
+      connectionId: connection.id,
+      path: refreshPath,
+      force,
+      skipIndex: force,
+    })
+    const nodes = sortNodes((response?.nodes ?? []) as FileNode[])
+    if (refreshPath === connection.remoteRoot) {
+      setRemoteColumns([nodes])
+      setRemoteSelected([])
+      return
     }
+    const selectedSnapshot = remoteSelectedRef.current
+    const selectedIndex = selectedSnapshot.findIndex((node) => node?.path === refreshPath)
+    if (selectedIndex < 0) return
+    setRemoteColumns((prev) => {
+      const base = prev.slice(0, selectedIndex + 1)
+      return [...base, nodes]
+    })
+    setRemoteSelected((prev) => prev.slice(0, selectedIndex + 1))
   }
+
+  useEffect(() => {
+    const unsubscribeRemoteRefresh = window.simpleSSH.workspace.onRemoteRefresh((payload) => {
+      const connection = activeConnectionRef.current
+      if (!connection || connection.id !== payload.connectionId) return
+      void refreshRemoteFolder(payload.remotePath)
+    })
+
+    return () => {
+      unsubscribeRemoteRefresh()
+    }
+  }, [])
 
   const handleScrollVisibility = (event: UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget as HTMLDivElement & { _scrollTimeout?: number }
@@ -545,6 +571,15 @@ function App() {
       path: node.path,
       type: node.type,
       codeCommand: activeConnection.codeCommand,
+    })
+  }
+
+  const handleShowRemoteContext = async (node: FileNode) => {
+    if (!activeConnection) return
+    await window.simpleSSH.workspace.showRemoteContextMenu({
+      connectionId: activeConnection.id,
+      path: node.path,
+      type: node.type,
     })
   }
 
@@ -671,15 +706,6 @@ function App() {
             >
               Local
             </button>
-            <button
-              className='section-tab icon'
-              onClick={handleRefreshCurrent}
-              disabled={!activeConnection}
-              aria-label='Reload workspace'
-              title='Reload workspace'
-            >
-              ?
-            </button>
           </div>
         </div>
         <div className='top-actions'>
@@ -735,7 +761,11 @@ function App() {
                               }
                             }}
                             onContextMenu={() => {
-                              if (workspaceView === 'local') void handleShowContext(node)
+                              if (workspaceView === 'local') {
+                                void handleShowContext(node)
+                              } else {
+                                void handleShowRemoteContext(node)
+                              }
                             }}
                           >
                             <span className={badge.className}>{badge.label}</span>

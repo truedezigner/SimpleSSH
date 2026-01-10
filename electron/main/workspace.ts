@@ -210,6 +210,53 @@ async function fetchRemoteDir(
   })
 }
 
+export async function refreshRemoteTree(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  rootPath: string,
+  options?: {
+    onProgress?: (path: string) => void
+    onEmpty?: (path: string) => void
+    onError?: (path: string, error: unknown) => void
+  },
+) {
+  const shouldLog = Boolean(options?.onProgress || options?.onEmpty || options?.onError)
+  if (shouldLog) {
+    console.log(`[remote-refresh] refreshing ${rootPath}`)
+  }
+  const normalizedRoot = rootPath.replace(/\\/g, '/')
+  return withSftp(connection, auth, async (sftp) => {
+    const queue: string[] = [normalizedRoot]
+    while (queue.length > 0) {
+      const current = queue.shift()
+      if (!current) continue
+      try {
+        options?.onProgress?.(current)
+        const entries = await readDir(sftp, current)
+        if (entries.length === 0) {
+          options?.onEmpty?.(current)
+        }
+        const nodes = entries.map((entry) => ({
+          name: entry.filename,
+          path: remoteJoin(current, entry.filename),
+          type: entry.attrs.isDirectory() ? 'dir' : 'file',
+          size: entry.attrs.size,
+        })) as FileNode[]
+        updateCachedDirByDiff(connection, current, nodes)
+        for (const entry of entries) {
+          const entryPath = remoteJoin(current, entry.filename)
+          options?.onProgress?.(entryPath)
+          if (entry.attrs.isDirectory()) {
+            queue.push(entryPath)
+          }
+        }
+      } catch (error) {
+        options?.onError?.(current, error)
+      }
+    }
+  })
+}
+
 async function indexRemoteTree(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
@@ -246,7 +293,7 @@ async function indexRemoteTree(
           type: entry.attrs.isDirectory() ? 'dir' : 'file',
           size: entry.attrs.size,
         })) as FileNode[]
-        setCachedDir(connection, current, nodes)
+        updateCachedDirByDiff(connection, current, nodes)
         for (const entry of entries) {
           const entryPath = remoteJoin(current, entry.filename)
           options?.onProgress?.(entryPath)
@@ -458,14 +505,14 @@ export async function listRemoteDir(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
   remotePath: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; skipIndex?: boolean },
 ) {
   const cached = getCachedDir(connection, remotePath)
   markAccess(connection, remotePath)
   if (options?.force) {
     const nodes = await fetchRemoteDir(connection, auth, remotePath)
     updateCachedDirByDiff(connection, remotePath, nodes)
-    if (connection.remoteIndexOnConnect) {
+    if (connection.remoteIndexOnConnect && !options?.skipIndex) {
       void indexRemoteTree(connection, auth)
     }
     return nodes
@@ -477,7 +524,7 @@ export async function listRemoteDir(
 
   const nodes = await fetchRemoteDir(connection, auth, remotePath)
   setCachedDir(connection, remotePath, nodes)
-  if (connection.remoteIndexOnConnect) {
+  if (connection.remoteIndexOnConnect && !options?.skipIndex) {
     void indexRemoteTree(connection, auth)
   }
   return nodes

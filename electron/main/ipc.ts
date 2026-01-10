@@ -12,7 +12,14 @@ import {
   setPrivateKey,
 } from './secretsStore'
 import { testConnection } from './sshClient'
-import { downloadRemoteFile, listLocalTree, listRemoteDir, rebuildRemoteIndex, syncRemoteToLocal } from './workspace'
+import {
+  downloadRemoteFile,
+  listLocalTree,
+  listRemoteDir,
+  rebuildRemoteIndex,
+  refreshRemoteTree,
+  syncRemoteToLocal,
+} from './workspace'
 import { forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
@@ -26,6 +33,16 @@ function revealLabel() {
 }
 
 export function registerIpcHandlers() {
+  const notifyStatus = (connectionId: string, message: string, kind: 'info' | 'ok' | 'error' = 'info') => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('workspace:status', {
+        connectionId,
+        kind,
+        message,
+      })
+    }
+  }
+
   setQueueStatusEmitter((status) => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('workspace:queueStatus', status)
@@ -234,7 +251,7 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(
     'workspace:remoteList',
-    async (_event, payload: { connectionId: string; path: string; force?: boolean }) => {
+    async (_event, payload: { connectionId: string; path: string; force?: boolean; skipIndex?: boolean }) => {
     const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
     if (!connection) return { ok: false, message: 'Connection not found.' }
     if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
@@ -253,6 +270,7 @@ export function registerIpcHandlers() {
     try {
       const nodes = await listRemoteDir(connection, auth, payload.path || connection.remoteRoot, {
         force: payload.force,
+        skipIndex: payload.skipIndex,
       })
       return { ok: true, message: 'Remote list loaded.', nodes }
     } catch (error) {
@@ -517,6 +535,99 @@ export function registerIpcHandlers() {
         })
       }
 
+      const menu = Menu.buildFromTemplate(template)
+      menu.popup({ window })
+      return { ok: true, message: 'Menu opened.' }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:showRemoteContextMenu',
+    async (
+      event,
+      payload: { connectionId: string; path: string; type: 'file' | 'dir' },
+    ) => {
+      if (!payload?.path) return { ok: false, message: 'No path provided.' }
+      const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const normalizedPath = payload.path.replace(/\\/g, '/')
+      const refreshTarget =
+        payload.type === 'dir' ? normalizedPath : path.posix.dirname(normalizedPath)
+      const refreshLabel = payload.type === 'dir' ? 'Refresh this folder' : 'Refresh parent folder'
+      const template = [
+        {
+          label: refreshLabel,
+          click: () => {
+            if (!payload.connectionId) return
+            void (async () => {
+              const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+              if (!connection) {
+                notifyStatus(payload.connectionId, 'Connection not found.', 'error')
+                return
+              }
+              if (!connection.remoteRoot) {
+                notifyStatus(payload.connectionId, 'Remote root is not set.', 'error')
+                return
+              }
+              const relative = path.posix.relative(connection.remoteRoot, refreshTarget)
+              if (relative.startsWith('..')) {
+                notifyStatus(payload.connectionId, 'Remote path is outside the connection root.', 'error')
+                return
+              }
+              let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+              const authType = connection.authType ?? 'password'
+              if (authType === 'password') {
+                const password = await getPassword(connection.id)
+                if (!password) {
+                  notifyStatus(payload.connectionId, 'Missing password.', 'error')
+                  return
+                }
+                auth = { password }
+              } else {
+                const privateKey = await getPrivateKey(connection.id)
+                const passphrase = await getPassphrase(connection.id)
+                if (!privateKey) {
+                  notifyStatus(payload.connectionId, 'Missing private key.', 'error')
+                  return
+                }
+                auth = { privateKey, passphrase: passphrase ?? undefined }
+              }
+              const toRelative = (value: string) => {
+                const resolved = value.replace(/\\/g, '/')
+                const rel = path.posix.relative(connection.remoteRoot, resolved)
+                if (!rel || rel === '.') return '.'
+                if (rel.startsWith('..')) return resolved
+                return rel
+              }
+              const notify = (message: string) => {
+                console.log(`[remote-refresh] ${message}`)
+                notifyStatus(connection.id, message, 'info')
+              }
+              notify(`Refreshing remote folder: ${toRelative(refreshTarget)}`)
+              await refreshRemoteTree(connection, auth, refreshTarget, {
+                onProgress: (targetPath) => {
+                  notify(`Refreshing remote folder: ${toRelative(targetPath)}`)
+                },
+                onEmpty: (targetPath) => {
+                  notify(`Refreshing remote folder: ${toRelative(targetPath)} (empty)`)
+                },
+                onError: (targetPath, error) => {
+                  const detail = error instanceof Error ? error.message : 'unknown error'
+                  notify(`Refreshing remote folder: failed to list ${toRelative(targetPath)} (${detail})`)
+                },
+              })
+              notifyStatus(connection.id, 'Remote folder refreshed.', 'ok')
+              event.sender.send('workspace:remoteRefresh', {
+                connectionId: connection.id,
+                remotePath: refreshTarget,
+              })
+            })()
+          },
+        },
+        {
+          label: 'Copy Remote Path',
+          click: () => clipboard.writeText(normalizedPath),
+        },
+      ]
       const menu = Menu.buildFromTemplate(template)
       menu.popup({ window })
       return { ok: true, message: 'Menu opened.' }

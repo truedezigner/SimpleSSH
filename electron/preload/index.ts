@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     list: (payload: { root: string; depth?: number }) => ipcRenderer.invoke('workspace:list', payload),
     openFolder: (payload: { root: string }) => ipcRenderer.invoke('workspace:openFolder', payload),
     sync: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:sync', payload),
-    remoteList: (payload: { connectionId: string; path: string; force?: boolean }) =>
+    remoteList: (payload: { connectionId: string; path: string; force?: boolean; skipIndex?: boolean }) =>
       ipcRenderer.invoke('workspace:remoteList', payload),
     rebuildRemoteIndex: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:rebuildRemoteIndex', payload),
@@ -55,6 +55,16 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       codeCommand?: string
     }) =>
       ipcRenderer.invoke('workspace:showContextMenu', payload),
+    showRemoteContextMenu: (payload: { connectionId: string; path: string; type: 'file' | 'dir' }) =>
+      ipcRenderer.invoke('workspace:showRemoteContextMenu', payload),
+    onRemoteRefresh: (handler: (payload: { connectionId: string; remotePath: string }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: { connectionId: string; remotePath: string },
+      ) => handler(payload)
+      ipcRenderer.on('workspace:remoteRefresh', listener)
+      return () => ipcRenderer.removeListener('workspace:remoteRefresh', listener)
+    },
   },
 })
 

@@ -26,6 +26,7 @@ interface Window {
         connectionId: string
         path: string
         force?: boolean
+        skipIndex?: boolean
       }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
       rebuildRemoteIndex: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
@@ -42,6 +43,12 @@ interface Window {
         type: 'file' | 'dir'
         codeCommand?: string
       }) => Promise<{ ok: boolean; message: string }>
+      showRemoteContextMenu: (payload: {
+        connectionId: string
+        path: string
+        type: 'file' | 'dir'
+      }) => Promise<{ ok: boolean; message: string }>
+      onRemoteRefresh: (handler: (payload: { connectionId: string; remotePath: string }) => void) => () => void
     }
   }
 }
