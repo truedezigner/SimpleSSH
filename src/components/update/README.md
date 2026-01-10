@@ -1,5 +1,7 @@
 # electron-updater
 
+Note: This component doc is upstream reference text. SimpleSSH UI notes live in README.md.
+
 English | [简体中文](README.zh-CN.md)
 
 > Use `electron-updater` to realize the update detection, download and installation of the electric program.

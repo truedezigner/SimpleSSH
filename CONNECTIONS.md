@@ -5,6 +5,8 @@ Stored in the app data directory:
 - Windows: %APPDATA%\SimpleSSH\connections.json
 - macOS: ~/Library/Application Support/SimpleSSH/connections.json
 
+UI note: the connections drawer and editor map 1:1 to this metadata.
+
 Example:
 ```
 [
@@ -19,6 +21,7 @@ Example:
     "remoteRoot": "/home/cpaneluser/public_html",
     "localRoot": "C:\\Users\\you\\SFTPSync\\SiteA",
     "verifyMode": "sha256-remote",
+    "syncMode": "manual",
     "codeCommand": "code"
   }
 ]
@@ -49,3 +52,8 @@ Key naming convention:
 - SSH/SFTP enabled in cPanel.
 - Default remote root: /home/<user>/public_html.
 - Verify mode default: sha256-remote, fallback to download-back.
+
+## Sync Modes
+- manual: only sync when you click Sync/Force Push.
+- upload: auto-upload local changes.
+- live: auto-upload local changes + poll remote for updates (mtime-based, last-write-wins).

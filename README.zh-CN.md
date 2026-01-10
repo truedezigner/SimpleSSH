@@ -1,5 +1,7 @@
 # vite-react-electron
 
+Note: This file is upstream template text. SimpleSSH-specific docs live in README.md.
+
 [![awesome-vite](https://awesome.re/mentioned-badge.svg)](https://github.com/vitejs/awesome-vite)
 ![GitHub stars](https://img.shields.io/github/stars/caoxiemeihao/vite-react-electron?color=fa6470)
 ![GitHub issues](https://img.shields.io/github/issues/caoxiemeihao/vite-react-electron?color=d8b22d)

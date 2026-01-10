@@ -1,5 +1,7 @@
 # electron-auto-update
 
+Note: This component doc is upstream reference text. SimpleSSH UI notes live in README.md.
+
 [English](README.md) | 简体中文
 
 使用`electron-updater`实现electron程序的更新检测、下载和安装等功能。

@@ -24,41 +24,39 @@ verification (size + hash).
 - Keychain-backed password/private key storage (read/write).
 - Test Connection flow (SSH connect + SFTP readdir).
 
-### Milestone 2 - Workspace Mirror + File Browser (Partial)
+### Milestone 2 - Workspace Mirror + File Browser (Done)
 - Choose local workspace folder per connection. (Done)
 - Initial sync: remote -> local (download). (Done)
-- Local file tree preview (depth-limited). (Done)
+- Local file explorer (column view). (Done)
 - Context menu actions (open in VS Code, reveal in OS, copy path). (Done)
 - Remote browser: lazy folder expansion + double-click download. (Done)
 
-### Milestone 3 - Auto-Upload + Queue (Not done)
+### Milestone 3 - Auto-Upload + Queue (Done)
 - File watcher on local workspace. (Done)
 - Debounced uploads on save. (Done)
 - Transfer queue with status (pending/active/failed). (Done)
 - Temp upload + atomic rename to avoid partial files. (Done)
 - Upload progress (% bytes) in activity list. (Done)
 
-### Milestone 4 - Upload Verification (Not done)
+### Milestone 4 - Upload Verification (Done)
 - Size check after upload. (Done)
 - SHA-256 verification via remote exec when available. (Done)
 - Fallback: download-back hashing when remote hash is unavailable. (Done)
 - UI state: Uploading -> Verifying -> Complete/Failed. (Done)
 
-### Milestone 5 - Remote Explorer UX (Partial)
+### Milestone 5 - Remote Explorer UX (Done)
 - Remote browser in workspace panel. (Done)
-- Always-visible status strip (connection + sync). (Done)
-- Open downloaded files automatically. (Not done)
+- Always-visible status strip (connection, roots, sync, queue). (Done)
+- Open downloaded files automatically. (Done)
 
 ## Tech Stack
 - Electron
 - React + TypeScript
 - ssh2
 - keytar
-- chokidar (planned)
-- p-queue (planned)
+- chokidar
+- p-queue
 
 ## Known Gaps / TODO
-- No local -> remote sync yet (only remote -> local download).
-- No watcher, queue, or verification yet.
-- File actions (open in editor, reveal, copy path) are now available via right-click in the workspace tree.
-- Example connection UI exists but does not open OS file explorer.
+- Transfer queue has no dedicated history panel (status bar summary only).
+- Live sync uses mtime comparisons rather than a full diff/merge engine.

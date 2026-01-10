@@ -39,5 +39,5 @@ npm run build:mac
 - src: renderer UI
 
 ## Known Gaps
-- Transfer queue UI is minimal (recent activity only).
+- Transfer queue has no dedicated history panel (status bar summary only).
 - Live sync is mtime-based (no full content diff/merge).

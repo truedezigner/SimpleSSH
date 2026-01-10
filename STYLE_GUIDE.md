@@ -27,9 +27,11 @@ precise type, and focused color accents.
 - Uppercase micro labels with tracking for panels
 
 ## Layout
-- Three-column layout: connections, editor, workspace
-- Rounded panels (18-22px)
-- Tight spacing with consistent 12-16px rhythm
+- Top bar with centered Remote/Local tabs and action buttons on the right
+- Connections drawer overlay for list + editor
+- Column explorer with inline file badges
+- Bottom status bar with text dividers
+- Rounded panels (18-22px) and tight 12-16px spacing
 
 ## Motion
 - Subtle lift on hover (1px) and shadow deepen

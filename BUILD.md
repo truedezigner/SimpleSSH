@@ -34,3 +34,4 @@ build:mac  -> tsc && vite build && electron-builder --mac
 ## Notes
 - Code signing can be added later for distribution.
 - For initial testing, unsigned builds are acceptable.
+- UI/feature notes live in README.md and are kept up to date with the app shell.
