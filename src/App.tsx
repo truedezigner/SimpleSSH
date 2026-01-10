@@ -557,6 +557,26 @@ function App() {
   const connectionStatusLabel = !activeConnection
     ? 'Connection: disconnected'
     : `Connection: ${activeConnection.name || activeConnection.host}`
+  const syncStateLabel = (() => {
+    if (!activeConnection) return 'Sync: offline'
+    if (queueStatus?.lastPhase) {
+      switch (queueStatus.lastPhase) {
+        case 'uploading':
+          return 'Sync: transferring'
+        case 'verifying':
+          return 'Sync: verifying'
+        case 'deleting':
+          return 'Sync: deleting'
+        case 'complete':
+          return 'Sync: complete'
+        case 'failed':
+          return 'Sync: error'
+        default:
+          return 'Sync: active'
+      }
+    }
+    return queueStatus?.watching ? 'Sync: watching' : 'Sync: idle'
+  })()
 
   return (
     <div className='app-shell'>
@@ -682,10 +702,7 @@ function App() {
 
       <div className='status-strip status-bottom'>
         <div className='status-chip'>{connectionStatusLabel}</div>
-        <div className='status-chip'>Local Root: {activeConnection?.localRoot || 'Unset'}</div>
-        <div className='status-chip'>Remote Root: {activeConnection?.remoteRoot || 'Unset'}</div>
-        <div className='status-chip'>Sync Mode: {activeConnection?.syncMode || 'manual'}</div>
-        <div className='status-chip'>Watching: {queueStatus?.watching ? 'On' : 'Off'}</div>
+        <div className='status-chip'>{syncStateLabel}</div>
         <div className='status-chip'>
           Queue: {queueStatus ? `${queueStatus.pending} pending, ${queueStatus.active} active` : 'Idle'}
         </div>
