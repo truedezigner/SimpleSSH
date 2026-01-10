@@ -585,12 +585,18 @@ function App() {
           <div className='brand-mark'>S</div>
           <div>
             <div className='brand-title-row'>
-              <div className='brand-name'>SimpleSSH</div>
+              <div className='brand-name'>
+                {activeConnection ? activeConnection.name || activeConnection.host : 'SimpleSSH'}
+              </div>
               {activeConnection?.hostingProvider && activeConnection.hostingProvider !== 'none' && (
                 <div className='provider-tag'>{activeConnection.hostingProvider}</div>
               )}
             </div>
-            <div className='brand-tag'>Remote-first sync workspace</div>
+            <div className='brand-tag'>
+              {activeConnection?.hostingProvider && activeConnection.hostingProvider !== 'none'
+                ? activeConnection.hostingProvider
+                : 'Remote-first sync workspace'}
+            </div>
           </div>
         </div>
         <div className='topbar-center'>
