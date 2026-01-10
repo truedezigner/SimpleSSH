@@ -544,7 +544,8 @@ textarea:focus {
 }
 
 .workspace-tree {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   overflow: hidden;
   flex: 1;
@@ -578,7 +579,8 @@ textarea:focus {
 }
 
 .column-shell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   border-radius: 12px;
   border: 1px solid rgba(124, 110, 255, 0.18);
@@ -588,6 +590,8 @@ textarea:focus {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
   width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .column-grid {
@@ -596,6 +600,8 @@ textarea:focus {
   overflow-x: visible;
   scrollbar-width: auto;
   scrollbar-color: auto;
+  flex: 1;
+  min-height: 0;
 }
 .breadcrumb-bar {
   display: flex;
