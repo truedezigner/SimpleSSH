@@ -14,13 +14,25 @@ import {
 import { testConnection } from './sshClient'
 import {
   downloadRemoteFile,
+  downloadRemoteFileToCache,
   listLocalTree,
   listRemoteDir,
   rebuildRemoteIndex,
   refreshRemoteTree,
   syncRemoteToLocal,
 } from './workspace'
-import { clearQueueHistory, forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
+import {
+  clearQueueHistory,
+  forceUploadFile,
+  getQueueStatus,
+  setQueueStatusEmitter,
+  suppressPath,
+  startCacheWatcher,
+  startWatcher,
+  stopWatcher,
+  updateWatchEntry,
+} from './uploader'
+import { clearRemoteCache, initRemoteCache } from './remoteCache'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
@@ -33,6 +45,7 @@ function revealLabel() {
 }
 
 export function registerIpcHandlers() {
+  void initRemoteCache()
   const notifyStatus = (connectionId: string, message: string, kind: 'info' | 'ok' | 'error' = 'info') => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('workspace:status', {
@@ -75,6 +88,7 @@ export function registerIpcHandlers() {
         }
         await deletePassword(saved.id)
       }
+      await updateWatchEntry(saved)
       return saved
     },
   )
@@ -362,6 +376,38 @@ export function registerIpcHandlers() {
     },
   )
 
+  ipcMain.handle(
+    'workspace:downloadRemoteFileToCache',
+    async (_event, payload: { connectionId: string; remotePath: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        const localPath = await downloadRemoteFileToCache(connection, auth, payload.remotePath)
+        suppressPath(connection.id, localPath)
+        if (connection.remoteFirstEditing) {
+          await startCacheWatcher(connection, auth)
+        }
+        return { ok: true, message: 'File downloaded to cache.', localPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to download file.'
+        return { ok: false, message }
+      }
+    },
+  )
+
   ipcMain.handle('workspace:startWatch', async (_event, payload: { connectionId: string }) => {
     const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
     if (!connection) return { ok: false, message: 'Connection not found.' }
@@ -405,6 +451,16 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('workspace:clearQueueHistory', async (_event, payload: { connectionId: string }) => {
     return clearQueueHistory(payload.connectionId)
+  })
+
+  ipcMain.handle('workspace:clearRemoteCache', async (_event, payload: { connectionId: string }) => {
+    try {
+      await clearRemoteCache(payload.connectionId)
+      return { ok: true, message: 'Remote cache cleared.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to clear remote cache.'
+      return { ok: false, message }
+    }
   })
 
   ipcMain.handle(

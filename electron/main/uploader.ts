@@ -6,6 +6,7 @@ import { Client, SFTPWrapper } from 'ssh2'
 import chokidar from 'chokidar'
 import PQueue from 'p-queue'
 import { Connection, SyncMode } from './connectionsStore'
+import { ensureCacheRoot, getCacheRoot, resolveRemotePathFromCache } from './remoteCache'
 
 export interface QueueStatus {
   connectionId: string
@@ -36,6 +37,7 @@ interface WatchEntry {
   connection: Connection
   auth: { password?: string; privateKey?: string; passphrase?: string }
   watcher?: chokidar.FSWatcher
+  cacheWatcher?: chokidar.FSWatcher
   queue: PQueue
   status: QueueStatus
   syncMode: SyncMode
@@ -67,10 +69,19 @@ function remoteJoin(...parts: string[]) {
   return path.posix.join(...parts)
 }
 
-function remotePathFromLocal(connection: Connection, localPath: string) {
+function resolveRemoteTarget(connection: Connection, localPath: string) {
+  const cachedRemote = resolveRemotePathFromCache(connection.id, localPath)
+  if (cachedRemote) {
+    return { remotePath: cachedRemote, source: 'cache' as const }
+  }
   const relative = path.relative(connection.localRoot, localPath)
-  if (!relative || relative.startsWith('..')) return null
-  return remoteJoin(connection.remoteRoot, ...relative.split(path.sep))
+  if (!relative || relative.startsWith('..')) {
+    return { remotePath: null, source: 'none' as const }
+  }
+  return {
+    remotePath: remoteJoin(connection.remoteRoot, ...relative.split(path.sep)),
+    source: 'local' as const,
+  }
 }
 
 function localPathFromRemote(connection: Connection, remotePath: string) {
@@ -288,12 +299,11 @@ async function uploadFile(
   auth: { password?: string; privateKey?: string; passphrase?: string },
   localPath: string,
   totalBytes: number,
+  remotePath: string,
+  tempPath: string,
   onProgress?: (bytesSent: number) => void,
 ) {
-  const remotePath = remotePathFromLocal(connection, localPath)
-  if (!remotePath) return null
   const remoteDir = path.posix.dirname(remotePath)
-  const tempPath = `${remotePath}.simplessh_tmp_${Date.now()}`
 
   await withSftp(connection, auth, async (sftp) => {
     let lastEmit = 0
@@ -312,7 +322,14 @@ async function uploadFile(
           },
         },
         (err) => {
-          if (err) reject(err)
+          if (err) {
+            const detail =
+              err && typeof err === 'object'
+                ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+                : String(err)
+            reject(new Error(`fastPut failed: ${detail}`))
+            return
+          }
           else resolve()
         },
       )
@@ -320,15 +337,63 @@ async function uploadFile(
     try {
       await new Promise<void>((resolve, reject) => {
         sftp.rename(tempPath, remotePath, (err) => {
-          if (err) reject(err)
+          if (err) {
+            const detail =
+              err && typeof err === 'object'
+                ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+                : String(err)
+            reject(new Error(`rename failed: ${detail}`))
+            return
+          }
           else resolve()
         })
       })
     } catch (error) {
-      await new Promise<void>((resolve) => {
-        sftp.unlink(tempPath, () => resolve())
-      })
-      throw error
+      const priorError = error instanceof Error ? error.message : String(error)
+      try {
+        await new Promise<void>((resolve) => {
+          sftp.unlink(remotePath, () => resolve())
+        })
+        await new Promise<void>((resolve, reject) => {
+          sftp.rename(tempPath, remotePath, (err) => {
+            if (err) {
+              const detail =
+                err && typeof err === 'object'
+                  ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+                  : String(err)
+              reject(new Error(`rename failed after unlink: ${detail}`))
+              return
+            }
+            else resolve()
+          })
+        })
+        return
+      } catch (retryError) {
+        const detail = retryError instanceof Error ? retryError.message : String(retryError)
+        try {
+          await new Promise<void>((resolve, reject) => {
+            sftp.fastPut(localPath, remotePath, (err) => {
+              if (err) {
+                const putDetail =
+                  err && typeof err === 'object'
+                    ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+                    : String(err)
+                reject(new Error(`direct fastPut failed: ${putDetail}`))
+                return
+              }
+              resolve()
+            })
+          })
+          return
+        } catch (finalError) {
+          const finalDetail = finalError instanceof Error ? finalError.message : String(finalError)
+          throw new Error(`${priorError}; retry failed: ${detail}; direct put failed: ${finalDetail}`)
+        }
+      } finally {
+        await new Promise<void>((resolve) => {
+          sftp.unlink(tempPath, () => resolve())
+        })
+      }
     }
   })
   return remotePath
@@ -457,24 +522,29 @@ async function verifyUpload(
   })
 
   if (remoteStat.size !== localStat.size) {
-    throw new Error('Upload verification failed (size mismatch).')
+    throw new Error(`Upload verification failed (size mismatch: local ${localStat.size}B, remote ${remoteStat.size}B).`)
   }
 
   const localHash = await hashLocalFile(localPath)
   let remoteHash: string
+  let verifyMethod: 'remote-exec' | 'download-back' = 'remote-exec'
 
   if (connection.verifyMode === 'download-back') {
     remoteHash = await hashRemoteDownload(connection, auth, remotePath)
+    verifyMethod = 'download-back'
   } else {
     try {
       remoteHash = await hashRemoteWithExec(connection, auth, remotePath)
     } catch {
       remoteHash = await hashRemoteDownload(connection, auth, remotePath)
+      verifyMethod = 'download-back'
     }
   }
 
   if (remoteHash !== localHash) {
-    throw new Error('Upload verification failed (hash mismatch).')
+    throw new Error(
+      `Upload verification failed (hash mismatch: local ${localHash} remote ${remoteHash}, method ${verifyMethod}).`,
+    )
   }
 }
 
@@ -581,6 +651,35 @@ function stopRemotePoll(entry: WatchEntry) {
   entry.pollActive = false
 }
 
+async function updateCacheWatcher(entry: WatchEntry) {
+  if (!entry.connection.remoteFirstEditing) {
+    if (entry.cacheWatcher) {
+      await entry.cacheWatcher.close()
+      entry.cacheWatcher = undefined
+    }
+    return
+  }
+  if (entry.cacheWatcher) return
+  await ensureCacheRoot(entry.connection.id)
+  const cacheRoot = getCacheRoot(entry.connection.id)
+  const watcher = chokidar.watch(cacheRoot, {
+    ignoreInitial: true,
+    awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 100 },
+    ignored: /(^|[\\/])\.(git|svn|hg)([\\/]|$)|node_modules/,
+  })
+  watcher
+    .on('add', (localPath) => {
+      enqueueUpload(entry, localPath)
+    })
+    .on('change', (localPath) => {
+      enqueueUpload(entry, localPath)
+    })
+    .on('error', (error) => {
+      updateStatus(entry, { lastError: String(error) })
+    })
+  entry.cacheWatcher = watcher
+}
+
 async function ensureEntry(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
@@ -630,6 +729,7 @@ async function ensureEntry(
       existing.watcher = undefined
       updateStatus(existing, { watching: false })
     }
+    await updateCacheWatcher(existing)
     if (syncMode === 'live') {
       if (existing.pollTimer && previousInterval !== pollIntervalMs) {
         stopRemotePoll(existing)
@@ -667,6 +767,7 @@ async function ensureEntry(
     recentLocalChanges: new Map(),
   }
 
+  await updateCacheWatcher(entry)
   if (options.watch) {
     const watcher = chokidar.watch(connection.localRoot, {
       ignoreInitial: true,
@@ -727,17 +828,50 @@ export async function stopWatcher(connectionId: string) {
   if (entry.watcher) {
     await entry.watcher.close()
   }
+  entry.watcher = undefined
   stopRemotePoll(entry)
-  entry.queue.clear()
-  entry.status = {
-    ...entry.status,
-    watching: false,
-    pending: 0,
-    active: 0,
+  if (!entry.connection.remoteFirstEditing) {
+    entry.queue.clear()
+    entry.status = {
+      ...entry.status,
+      watching: false,
+      pending: 0,
+      active: 0,
+    }
+    emitStatus(entry.status)
+    if (entry.cacheWatcher) {
+      await entry.cacheWatcher.close()
+      entry.cacheWatcher = undefined
+    }
+    watchers.delete(connectionId)
+  } else {
+    updateStatus(entry, { watching: false })
   }
-  emitStatus(entry.status)
-  watchers.delete(connectionId)
   return entry.status
+}
+
+export async function startCacheWatcher(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+) {
+  const entry = await ensureEntry(connection, auth, { watch: false })
+  await updateCacheWatcher(entry)
+  return entry.status
+}
+
+export async function updateWatchEntry(connection: Connection) {
+  const entry = watchers.get(connection.id)
+  if (!entry) return null
+  entry.connection = connection
+  await updateCacheWatcher(entry)
+  return entry.status
+}
+
+export function suppressPath(connectionId: string, localPath: string) {
+  const entry = watchers.get(connectionId)
+  if (!entry) return false
+  markSuppressed(entry, localPath)
+  return true
 }
 
 export async function forceUploadFile(
@@ -774,12 +908,17 @@ function enqueueUpload(entry: WatchEntry, localPath: string, options?: { force?:
   entry.queue
     .add(async () => {
       refreshQueueCounts(entry)
+      let stage = 'prepare'
+      let debugNote = ''
       try {
         item.phase = 'uploading'
         item.updatedAt = Date.now()
         updateRecent(entry, item)
         updateStatus(entry, { lastPath: localPath, lastPhase: 'uploading', lastError: undefined })
+        stage = 'stat'
         const stat = await fs.stat(localPath)
+        const baseMtimeMs = stat.mtimeMs
+        const baseSize = stat.size
         if (!stat.isFile()) {
           return
         }
@@ -787,15 +926,35 @@ function enqueueUpload(entry: WatchEntry, localPath: string, options?: { force?:
         item.bytesSent = 0
         item.updatedAt = Date.now()
         updateRecent(entry, item)
-        const remotePath = remotePathFromLocal(entry.connection, localPath)
-        if (!remotePath) return
+        const target = resolveRemoteTarget(entry.connection, localPath)
+        const remotePath = target.remotePath
+        const tempPath = remotePath ? `${remotePath}.simplessh_tmp_${Date.now()}` : null
+        debugNote = remotePath
+          ? `Target: ${remotePath} | Source: ${target.source} | Temp: ${tempPath}`
+          : `Target: (none) | Source: ${target.source}`
+        if (!remotePath) {
+          item.phase = 'failed'
+          item.error = 'No remote path mapping for file.'
+          item.note = debugNote
+          item.updatedAt = Date.now()
+          updateRecent(entry, item)
+          updateStatus(entry, {
+            failed: entry.status.failed + 1,
+            lastPath: localPath,
+            lastError: item.error,
+            lastPhase: 'failed',
+          })
+          return
+        }
         if (!options?.force) {
+          stage = 'remote-stat'
           const remoteStat = await withSftp(entry.connection, entry.auth, async (sftp) => {
             return sftpStat(sftp, remotePath)
           })
           if (remoteStat) {
             const remoteMtimeMs = remoteStat.mtime * 1000
             if (remoteMtimeMs > stat.mtimeMs + MTIME_SKEW_MS) {
+              stage = 'pull-remote-newer'
               markSuppressed(entry, localPath)
               await downloadRemoteFile(entry.connection, entry.auth, remotePath, remoteStat.mtime)
               entry.recentLocalChanges.delete(localPath)
@@ -813,11 +972,14 @@ function enqueueUpload(entry: WatchEntry, localPath: string, options?: { force?:
             }
           }
         }
+        stage = 'upload'
         const uploadedPath = await uploadFile(
           entry.connection,
           entry.auth,
           localPath,
           stat.size,
+          remotePath,
+          tempPath,
           (bytesSent) => {
             item.bytesSent = bytesSent
             item.updatedAt = Date.now()
@@ -825,10 +987,25 @@ function enqueueUpload(entry: WatchEntry, localPath: string, options?: { force?:
           },
         )
         if (!uploadedPath) return
+        const latestStat = await fs.stat(localPath).catch(() => null)
+        if (!latestStat || latestStat.size !== baseSize || latestStat.mtimeMs > baseMtimeMs + MTIME_SKEW_MS) {
+          item.phase = 'complete'
+          item.note = 'Superseded by newer local edit; verification skipped.'
+          item.updatedAt = Date.now()
+          updateRecent(entry, item)
+          updateStatus(entry, {
+            processed: entry.status.processed + 1,
+            lastPath: localPath,
+            lastError: undefined,
+            lastPhase: 'complete',
+          })
+          return
+        }
         item.phase = 'verifying'
         item.updatedAt = Date.now()
         updateRecent(entry, item)
         updateStatus(entry, { lastPhase: 'verifying' })
+        stage = 'verify'
         await verifyUpload(entry.connection, entry.auth, localPath, uploadedPath)
         entry.recentLocalChanges.delete(localPath)
         item.phase = 'complete'
@@ -842,13 +1019,17 @@ function enqueueUpload(entry: WatchEntry, localPath: string, options?: { force?:
         })
       } catch (error) {
         item.phase = 'failed'
-        item.error = error instanceof Error ? error.message : String(error)
+        const detail = error instanceof Error ? error.message : String(error)
+        item.error = detail ? `${detail} (stage: ${stage})` : `Upload failed. (stage: ${stage})`
+        if (!item.note && debugNote) {
+          item.note = debugNote
+        }
         item.updatedAt = Date.now()
         updateRecent(entry, item)
         updateStatus(entry, {
           failed: entry.status.failed + 1,
           lastPath: localPath,
-          lastError: error instanceof Error ? error.message : String(error),
+          lastError: detail ? `${detail} (stage: ${stage})` : `Upload failed. (stage: ${stage})`,
           lastPhase: 'failed',
         })
       } finally {
@@ -880,19 +1061,40 @@ function enqueueDelete(entry: WatchEntry, localPath: string) {
   entry.queue
     .add(async () => {
       refreshQueueCounts(entry)
+      let stage = 'prepare'
+      let debugNote = ''
       try {
         item.phase = 'deleting'
         item.updatedAt = Date.now()
         updateRecent(entry, item)
         updateStatus(entry, { lastPath: localPath, lastPhase: 'deleting', lastError: undefined })
-        const remotePath = remotePathFromLocal(entry.connection, localPath)
-        if (!remotePath) return
+        const target = resolveRemoteTarget(entry.connection, localPath)
+        const remotePath = target.remotePath
+        debugNote = remotePath
+          ? `Target: ${remotePath} | Source: ${target.source}`
+          : `Target: (none) | Source: ${target.source}`
+        if (!remotePath) {
+          item.phase = 'failed'
+          item.error = 'No remote path mapping for file.'
+          item.note = debugNote
+          item.updatedAt = Date.now()
+          updateRecent(entry, item)
+          updateStatus(entry, {
+            failed: entry.status.failed + 1,
+            lastPath: localPath,
+            lastError: item.error,
+            lastPhase: 'failed',
+          })
+          return
+        }
+        stage = 'remote-stat'
         const remoteStat = await withSftp(entry.connection, entry.auth, async (sftp) => {
           return sftpStat(sftp, remotePath)
         })
         if (remoteStat) {
           const remoteMtimeMs = remoteStat.mtime * 1000
           if (remoteMtimeMs > deleteRequestedAt + MTIME_SKEW_MS) {
+            stage = 'restore-remote-newer'
             markSuppressed(entry, localPath)
             await downloadRemoteFile(entry.connection, entry.auth, remotePath, remoteStat.mtime)
             entry.recentLocalChanges.delete(localPath)
@@ -909,6 +1111,7 @@ function enqueueDelete(entry: WatchEntry, localPath: string) {
             return
           }
         }
+        stage = 'delete'
         await withSftp(entry.connection, entry.auth, async (sftp) => {
           await removeRemotePath(sftp, remotePath)
         })
@@ -924,13 +1127,17 @@ function enqueueDelete(entry: WatchEntry, localPath: string) {
         })
       } catch (error) {
         item.phase = 'failed'
-        item.error = error instanceof Error ? error.message : String(error)
+        const detail = error instanceof Error ? error.message : String(error)
+        item.error = detail ? `${detail} (stage: ${stage})` : `Delete failed. (stage: ${stage})`
+        if (!item.note && debugNote) {
+          item.note = debugNote
+        }
         item.updatedAt = Date.now()
         updateRecent(entry, item)
         updateStatus(entry, {
           failed: entry.status.failed + 1,
           lastPath: localPath,
-          lastError: error instanceof Error ? error.message : String(error),
+          lastError: detail ? `${detail} (stage: ${stage})` : `Delete failed. (stage: ${stage})`,
           lastPhase: 'failed',
         })
       } finally {

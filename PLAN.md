@@ -77,3 +77,54 @@ verification (size + hash).
 - Include filtering for status (failed/complete/active). (Done)
 - Support clearing the history list per connection. (Done)
 - Show timestamps and error details for failed entries. (Done)
+
+## Release Notes / Reminders
+- Merge branch `test-feature-history` into `main` when ready and push to origin.
+
+## Plan - Remote-First Editing + Safe Auto-Upload
+
+### Goal
+Enable a "remote-first" flow: open a remote file, edit locally, and have saves
+auto-upload back to the original remote path even if the local root does not
+mirror the remote tree. Preserve the existing ability to force-upload new local
+files that do not exist remotely.
+
+### Proposed UX
+- Remote file double-click:
+  - Downloads to a temp / managed local cache path.
+  - Opens in the configured editor.
+  - Associates local cache file with its original remote path.
+- Local file list:
+  - Show cached files in a dedicated "Remote Cache" section (or tag/label).
+  - Context menu: "Force Upload Back to Original Path" for cached files.
+- Existing force upload:
+  - Continues to upload based on localRoot -> remoteRoot mapping for normal local files.
+
+### Data Model / Storage
+- Store mapping: localCachePath -> { connectionId, remotePath, mtime, size, lastSyncAt }.
+- Persist in app data (per-connection) so local cache stays clean:
+  - Windows: %APPDATA%\\SimpleSSH\\cache-map.json
+  - macOS: ~/Library/Application Support/SimpleSSH/cache-map.json
+- Cleanup policy:
+  - Evict entries older than N days or when cache exceeds size limit.
+
+### Sync Behavior
+- When a cached file changes:
+  - Use stored remotePath for upload (ignore localRoot mapping).
+  - Verify upload (existing hash/size verification).
+  - Update cache entry metadata on success.
+- When remote changes are detected (live mode):
+  - If a cached file exists for that remotePath, refresh the local cache file.
+
+### Safety
+- Confirmation prompt if the stored remotePath differs from the computed mapped path.
+- Never delete remote files from cached file edits (uploads only).
+- Keep auto-sync optional; remote-first flow works in manual or upload modes.
+
+### Implementation Steps
+1) Add cache directory per connection; implement download-into-cache.
+2) Create cache mapping store + load/save helpers.
+3) Extend uploader to detect cached file paths and route uploads to stored remotePath.
+4) UI: tag cached files, add "Force Upload Back" action.
+5) Add cleanup job for stale cache entries.
+6) Update docs (README / CONNECTIONS) to describe the remote-first flow.

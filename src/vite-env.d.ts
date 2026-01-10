@@ -30,10 +30,12 @@ interface Window {
       }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
       rebuildRemoteIndex: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
+      downloadRemoteFileToCache: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       stopWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       forceUploadFile: (payload: { connectionId: string; path: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       clearQueueHistory: (payload: { connectionId: string }) => Promise<unknown | null>
+      clearRemoteCache: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void

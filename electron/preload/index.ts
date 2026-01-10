@@ -30,10 +30,14 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.invoke('workspace:rebuildRemoteIndex', payload),
     downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) =>
       ipcRenderer.invoke('workspace:downloadRemoteFile', payload),
+    downloadRemoteFileToCache: (payload: { connectionId: string; remotePath: string }) =>
+      ipcRenderer.invoke('workspace:downloadRemoteFileToCache', payload),
     startWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:startWatch', payload),
     stopWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:stopWatch', payload),
     clearQueueHistory: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:clearQueueHistory', payload),
+    clearRemoteCache: (payload: { connectionId: string }) =>
+      ipcRenderer.invoke('workspace:clearRemoteCache', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
     onStatus: (handler: (status: unknown) => void) => {

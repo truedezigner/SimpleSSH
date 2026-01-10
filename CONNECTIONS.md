@@ -22,6 +22,7 @@ Example:
     "localRoot": "C:\\Users\\you\\SFTPSync\\SiteA",
     "verifyMode": "sha256-remote",
     "syncMode": "manual",
+    "remoteFirstEditing": false,
     "codeCommand": "code"
   }
 ]
@@ -47,6 +48,17 @@ Key naming convention:
 - Export writes connections metadata to a JSON file.
 - Import reads JSON and upserts each connection.
 - Passwords are not exported or imported.
+
+## Remote-First Editing (Beta)
+When enabled per connection, remote file downloads are stored in a managed cache
+and auto-uploaded back to the original remote path on save. This avoids the need
+for local root mirroring.
+
+Cache location:
+- Windows: %APPDATA%\SimpleSSH\remote-cache\<connectionId>\
+- macOS: ~/Library/Application Support/SimpleSSH/remote-cache/<connectionId>/
+
+Use "Clear Remote Cache" in the connection editor to delete cached files.
 
 ## Recommended Defaults (NameHero / cPanel)
 - SSH/SFTP enabled in cPanel.

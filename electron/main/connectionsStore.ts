@@ -25,6 +25,7 @@ export interface Connection {
   remoteIndexOnConnect: boolean
   remotePinThreshold: number
   remotePinnedMaxEntries: number
+  remoteFirstEditing: boolean
 }
 
 export interface ConnectionInput extends Omit<Connection, 'id'> {
@@ -51,6 +52,7 @@ async function readConnections(): Promise<Connection[]> {
         remoteIndexOnConnect: true,
         remotePinThreshold: 3,
         remotePinnedMaxEntries: 200,
+        remoteFirstEditing: false,
         ...item,
       })) as Connection[]
     }
@@ -88,6 +90,7 @@ export async function upsertConnection(input: ConnectionInput) {
     remoteIndexOnConnect: true,
     remotePinThreshold: 3,
     remotePinnedMaxEntries: 200,
+    remoteFirstEditing: false,
     ...input,
     id,
   }

@@ -24,6 +24,7 @@ interface Connection {
   remoteIndexOnConnect: boolean
   remotePinThreshold: number
   remotePinnedMaxEntries: number
+  remoteFirstEditing: boolean
 }
 
 interface ConnectionDraft extends Omit<Connection, 'id'> {
@@ -87,6 +88,7 @@ const defaultConnection = (): ConnectionDraft => ({
   remoteIndexOnConnect: true,
   remotePinThreshold: 3,
   remotePinnedMaxEntries: 200,
+  remoteFirstEditing: false,
 })
 
 const sortNodes = (nodes: FileNode[]) => {
@@ -562,15 +564,33 @@ function App() {
 
   const handleDownloadRemoteFile = async (node: FileNode) => {
     if (!activeConnection) return
-    const result = await window.simpleSSH.workspace.downloadRemoteFile({
-      connectionId: activeConnection.id,
-      remotePath: node.path,
-    })
-    if (result?.ok) {
-      setStatusMessage({ kind: 'ok', message: 'Downloaded remote file.' })
-    } else {
+    const useCache = Boolean(activeConnection.remoteFirstEditing)
+    const result = useCache
+      ? await window.simpleSSH.workspace.downloadRemoteFileToCache({
+          connectionId: activeConnection.id,
+          remotePath: node.path,
+        })
+      : await window.simpleSSH.workspace.downloadRemoteFile({
+          connectionId: activeConnection.id,
+          remotePath: node.path,
+        })
+    if (!result?.ok) {
       setStatusMessage({ kind: 'error', message: result?.message || 'Download failed.' })
+      return
     }
+    if (useCache && result.localPath) {
+      const openResult = await window.simpleSSH.workspace.openInEditor({
+        path: result.localPath,
+        codeCommand: activeConnection.codeCommand,
+      })
+      if (openResult?.ok) {
+        setStatusMessage({ kind: 'ok', message: openResult.message || 'Downloaded to cache and opened.' })
+      } else {
+        setStatusMessage({ kind: 'error', message: openResult?.message || 'Downloaded but failed to open.' })
+      }
+      return
+    }
+    setStatusMessage({ kind: 'ok', message: 'Downloaded remote file.' })
   }
 
   const handleOpenLocalFile = async (node: FileNode) => {
@@ -914,8 +934,8 @@ function App() {
                   ) : null}
                 </div>
                 {item.note && <div className='queue-note'>{item.note}</div>}
-                {item.phase === 'failed' && item.error && (
-                  <div className='queue-error'>{item.error}</div>
+                {item.phase === 'failed' && (
+                  <div className='queue-error'>{item.error || queueStatus?.lastError || 'Upload failed.'}</div>
                 )}
               </div>
             )
@@ -1093,6 +1113,16 @@ function App() {
                   }
                 />
                 Initial remote index on connect
+              </label>
+              <label>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.remoteFirstEditing}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, remoteFirstEditing: event.target.checked }))
+                  }
+                />
+                Remote-first editing (beta)
               </label>
               <label>
                 Pin cache after N visits
@@ -1278,6 +1308,22 @@ function App() {
                 disabled={!connectionDraft.id || !connectionDraft.remoteRoot}
               >
                 Rebuild Remote Index
+              </button>
+              <button
+                className='ghost'
+                onClick={async () => {
+                  if (!connectionDraft.id) return
+                  const result = await window.simpleSSH.workspace.clearRemoteCache({
+                    connectionId: connectionDraft.id,
+                  })
+                  setStatusMessage({
+                    kind: result?.ok ? 'ok' : 'error',
+                    message: result?.message || 'Remote cache cleared.',
+                  })
+                }}
+                disabled={!connectionDraft.id}
+              >
+                Clear Remote Cache
               </button>
               <button className='ghost' onClick={() => setEditorOpen(false)}>
                 Close

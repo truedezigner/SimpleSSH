@@ -3,6 +3,7 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { Client, SFTPWrapper } from 'ssh2'
 import { Connection } from './connectionsStore'
+import { getCachedLocalPath, recordCacheEntry } from './remoteCache'
 
 export interface FileNode {
   name: string
@@ -548,4 +549,26 @@ export async function downloadRemoteFile(
       })
     })
   })
+}
+
+export async function downloadRemoteFileToCache(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  remotePath: string,
+) {
+  const relative = remoteRelative(connection.remoteRoot, remotePath)
+  if (!relative) throw new Error('Remote path is outside the connection root.')
+  const localPath = getCachedLocalPath(connection.id, connection.remoteRoot, remotePath)
+  await ensureDir(path.dirname(localPath))
+
+  const savedPath = await withSftp(connection, auth, async (sftp) => {
+    return new Promise<string>((resolve, reject) => {
+      sftp.fastGet(remotePath, localPath, (err) => {
+        if (err) reject(err)
+        else resolve(localPath)
+      })
+    })
+  })
+  recordCacheEntry(connection.id, remotePath, savedPath)
+  return savedPath
 }
