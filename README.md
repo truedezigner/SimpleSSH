@@ -2,7 +2,7 @@
 
 SimpleSSH is a Panic-inspired SFTP sync client built with Electron, React, and
 TypeScript. It manages SSH connections, mirrors a remote folder locally, and
-previews the local workspace tree. Upload queue and verification are planned.
+previews the local workspace tree. Upload queue and verification are built in.
 
 ## Current Features
 - Connections list and editor.
@@ -12,10 +12,12 @@ previews the local workspace tree. Upload queue and verification are planned.
 - Test connection (SSH + SFTP readdir).
 - Workspace folder selection.
 - Initial sync (remote -> local download).
-- Remote file browser (lazy expansion + double-click download).
-- Local workspace tree preview (depth-limited).
-- Auto-upload watcher with queued uploads (basic status, includes deletes + verification).
-- Recent activity queue panel.
+- Remote file browser (column view + double-click download).
+- Local workspace column view (lazy folder expansion).
+- Auto-upload watcher with queued uploads (includes deletes + verification).
+- Live sync mode (polls remote + last-write-wins resolution).
+- Force push to upload local workspace in bulk.
+- Bottom status bar with connection, roots, sync mode, and queue state.
 - Right-click actions (open in VS Code, reveal in OS, copy paths).
 - Import/export of connection metadata.
 
@@ -37,5 +39,5 @@ npm run build:mac
 - src: renderer UI
 
 ## Known Gaps
-- Detailed transfer queue UI not implemented.
-- Auto-open after remote download not implemented.
+- Transfer queue UI is minimal (recent activity only).
+- Live sync is mtime-based (no full content diff/merge).
