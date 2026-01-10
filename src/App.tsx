@@ -25,6 +25,7 @@ interface Connection {
   remotePinThreshold: number
   remotePinnedMaxEntries: number
   remoteFirstEditing: boolean
+  foldersFirst: boolean
 }
 
 interface ConnectionDraft extends Omit<Connection, 'id'> {
@@ -106,11 +107,13 @@ const defaultConnection = (): ConnectionDraft => ({
   remotePinThreshold: 3,
   remotePinnedMaxEntries: 200,
   remoteFirstEditing: false,
+  foldersFirst: true,
 })
 
-const sortNodes = (nodes: FileNode[]) => {
+const sortNodes = (nodes: FileNode[], options?: { foldersFirst?: boolean }) => {
+  const foldersFirst = options?.foldersFirst ?? true
   return [...nodes].sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+    if (foldersFirst && a.type !== b.type) return a.type === 'dir' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
 }
@@ -363,7 +366,7 @@ function App() {
 
   const loadLocalRoot = async (connection: Connection) => {
     const nodes = await window.simpleSSH.workspace.list({ root: connection.localRoot, depth: 1 })
-    const sorted = sortNodes((nodes ?? []) as FileNode[])
+    const sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: connection.foldersFirst })
     setLocalColumns([sorted])
     setLocalSelected([])
   }
@@ -375,7 +378,7 @@ function App() {
       force: options?.force,
     })
     const nodes = (response?.nodes ?? []) as FileNode[]
-    setRemoteColumns([sortNodes(nodes)])
+    setRemoteColumns([sortNodes(nodes, { foldersFirst: connection.foldersFirst })])
     setRemoteSelected([])
   }
 
@@ -586,7 +589,7 @@ function App() {
       force,
       skipIndex: force,
     })
-    const nodes = sortNodes((response?.nodes ?? []) as FileNode[])
+    const nodes = sortNodes((response?.nodes ?? []) as FileNode[], { foldersFirst: connection.foldersFirst })
     if (refreshPath === connection.remoteRoot) {
       setRemoteColumns([nodes])
       setRemoteSelected([])
@@ -604,7 +607,7 @@ function App() {
 
   const refreshLocalFolder = async (targetPath: string, columnIndex: number) => {
     const children = await window.simpleSSH.workspace.list({ root: targetPath, depth: 1 })
-    const sorted = sortNodes((children ?? []) as FileNode[])
+    const sorted = sortNodes((children ?? []) as FileNode[], { foldersFirst: activeConnection?.foldersFirst })
     setLocalColumns((prev) => {
       const safeIndex = Math.max(0, Math.min(columnIndex, prev.length - 1))
       const base = prev.slice(0, safeIndex)
@@ -708,7 +711,7 @@ function App() {
 
     if (node.type === 'dir') {
       const children = await window.simpleSSH.workspace.list({ root: node.path, depth: 1 })
-      const sorted = sortNodes((children ?? []) as FileNode[])
+      const sorted = sortNodes((children ?? []) as FileNode[], { foldersFirst: activeConnection?.foldersFirst })
       setLocalColumns((prev) => {
         const base = prev.slice(0, columnIndex + 1)
         return [...base, sorted]
@@ -731,7 +734,7 @@ function App() {
         connectionId: activeConnection.id,
         path: node.path,
       })
-      const nodes = sortNodes((response?.nodes ?? []) as FileNode[])
+      const nodes = sortNodes((response?.nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
       setRemoteColumns((prev) => {
         const base = prev.slice(0, columnIndex + 1)
         return [...base, nodes]
@@ -1628,6 +1631,16 @@ function App() {
                   }
                 />
                 Remote-first editing (beta)
+              </label>
+              <label>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.foldersFirst}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, foldersFirst: event.target.checked }))
+                  }
+                />
+                Folders above files
               </label>
               <label>
                 Pin cache after N visits

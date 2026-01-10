@@ -23,6 +23,7 @@ Example:
     "verifyMode": "sha256-remote",
     "syncMode": "manual",
     "remoteFirstEditing": false,
+    "foldersFirst": true,
     "codeCommand": "code"
   }
 ]
