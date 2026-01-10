@@ -53,6 +53,8 @@ Key naming convention:
 When enabled per connection, remote file downloads are stored in a managed cache
 and auto-uploaded back to the original remote path on save. This avoids the need
 for local root mirroring.
+If a new local save happens during verification, the queue item is marked as
+superseded and the newer save is uploaded next.
 
 Cache location:
 - Windows: %APPDATA%\SimpleSSH\remote-cache\<connectionId>\

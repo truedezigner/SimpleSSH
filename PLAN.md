@@ -81,7 +81,7 @@ verification (size + hash).
 ## Release Notes / Reminders
 - Merge branch `test-feature-history` into `main` when ready and push to origin.
 
-## Plan - Remote-First Editing + Safe Auto-Upload
+## Plan - Remote-First Editing + Safe Auto-Upload (Done)
 
 ### Goal
 Enable a "remote-first" flow: open a remote file, edit locally, and have saves
@@ -122,9 +122,9 @@ files that do not exist remotely.
 - Keep auto-sync optional; remote-first flow works in manual or upload modes.
 
 ### Implementation Steps
-1) Add cache directory per connection; implement download-into-cache.
-2) Create cache mapping store + load/save helpers.
-3) Extend uploader to detect cached file paths and route uploads to stored remotePath.
-4) UI: tag cached files, add "Force Upload Back" action.
-5) Add cleanup job for stale cache entries.
-6) Update docs (README / CONNECTIONS) to describe the remote-first flow.
+1) Add cache directory per connection; implement download-into-cache. (Done)
+2) Create cache mapping store + load/save helpers. (Done)
+3) Extend uploader to detect cached file paths and route uploads to stored remotePath. (Done)
+4) UI: remote-first toggle + clear cache action. (Done)
+5) Verify uploads are resilient to rapid re-saves (superseded verification note). (Done)
+6) Update docs (README / CONNECTIONS) to describe the remote-first flow. (Done)

@@ -13,7 +13,7 @@ previews the local workspace tree. Upload queue and verification are built in.
 - Workspace folder selection.
 - Initial sync (remote -> local download).
 - Remote file browser (column view + double-click download).
-- Remote-first editing (download to cache + auto-upload on save).
+- Remote-first editing (download to cache + auto-upload on save, with superseded-save handling).
 - Local workspace column view (lazy folder expansion).
 - Auto-upload watcher with queued uploads (includes deletes + verification).
 - Live sync mode (polls remote + last-write-wins resolution).
