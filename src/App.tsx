@@ -450,7 +450,7 @@ function App() {
     }
   }
 
-  const handleColumnScroll = (event: UIEvent<HTMLDivElement>) => {
+  const handleScrollVisibility = (event: UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget as HTMLDivElement & { _scrollTimeout?: number }
     target.classList.add('scrolling')
     if (target._scrollTimeout) {
@@ -629,7 +629,7 @@ function App() {
               <div className='column-grid'>
                 {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
                     <div className={`column ${columnIndex > 0 ? 'linked' : ''}`} key={`col-${columnIndex}`}>
-                      <div className='column-list' onScroll={handleColumnScroll}>
+                      <div className='column-list scroll-hide' onScroll={handleScrollVisibility}>
                         {column.map((node) => {
                           const isActive =
                             workspaceView === 'local'
@@ -694,7 +694,10 @@ function App() {
         )}
       </div>
 
-      <div className={`connections-drawer ${drawerOpen ? 'open' : ''}`}>
+        <div
+          className={`connections-drawer scroll-hide ${drawerOpen ? 'open' : ''}`}
+          onScroll={handleScrollVisibility}
+        >
         <div className='connections-header'>
           <div className='panel-title'>Connections</div>
           <div className='connections-actions'>
@@ -732,7 +735,7 @@ function App() {
           </div>
         </div>
 
-        <div className='connection-list'>
+        <div className='connection-list scroll-hide' onScroll={handleScrollVisibility}>
           {connections.length === 0 && <div className='empty'>No connections yet.</div>}
           {connections.map((connection) => (
             <div

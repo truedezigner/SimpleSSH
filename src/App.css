@@ -210,6 +210,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: auto;
   transform: translateX(-110%);
   opacity: 0;
   pointer-events: none;
@@ -654,6 +655,8 @@ textarea:focus {
   flex-direction: column;
   min-width: 180px;
   max-width: 220px;
+  height: 100%;
+  min-height: 0;
   background: rgba(8, 6, 20, 0.8);
   border: 1px solid rgba(124, 110, 255, 0.18);
   border-right: 0;
@@ -680,42 +683,39 @@ textarea:focus {
   display: grid;
   gap: 3px;
   overflow-y: auto;
+  flex: 1;
   min-height: 0;
   padding-right: 4px;
 }
 
-.column-list {
+.scroll-hide {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-.column-list::-webkit-scrollbar {
+.scroll-hide::-webkit-scrollbar {
   width: 6px;
 }
 
-.column-list::-webkit-scrollbar-track {
+.scroll-hide::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 999px;
 }
 
-.column-list::-webkit-scrollbar-thumb {
+.scroll-hide::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
 }
 
-.column-list:hover {
-  scrollbar-color: transparent transparent;
-}
-
-.column-list.scrolling {
+.scroll-hide.scrolling {
   scrollbar-color: rgba(124, 110, 255, 0.45) rgba(14, 12, 34, 0.55);
 }
 
-.column-list.scrolling::-webkit-scrollbar-track {
+.scroll-hide.scrolling::-webkit-scrollbar-track {
   background: rgba(14, 12, 34, 0.55);
 }
 
-.column-list.scrolling::-webkit-scrollbar-thumb {
+.scroll-hide.scrolling::-webkit-scrollbar-thumb {
   background: rgba(124, 110, 255, 0.45);
 }
 
