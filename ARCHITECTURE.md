@@ -8,10 +8,11 @@ status feedback.
 
 ```
 Renderer (React UI)
-  - Connections list + editor
+  - Connections list + editor (per-connection options like remote-first + folders-first)
   - Workspace column file explorer with badges + inline create/rename/delete
   - Top bar actions (sync, force push, auto sync, reload)
   - Bottom status bar (connection, roots, sync, queue) + transfer history popup
+  - Built-in code editor panel (planned)
         |
         +-- IPC
 Main (Electron/Node)
@@ -37,6 +38,8 @@ Main (Electron/Node)
 
 ### Renderer
 - List, add, edit, and delete connections.
+- Surface per-connection options that affect browsing and sync behavior.
+- Host the built-in code editor panel while keeping external editor launches.
 - Validate inputs and auto-derive remote root from username.
 - Pick a local workspace folder.
 - Trigger remote sync and reload the active tree view.

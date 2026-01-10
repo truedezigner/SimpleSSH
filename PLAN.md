@@ -60,7 +60,7 @@ verification (size + hash).
 
 ## Known Gaps / TODO
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
-- Column view filters/sorting (folders-first toggle, name/size/modified).
+- Column view filters/sorting (name/size/modified).
 
 ## Upcoming Plan - Remote Cache Indexing
 - Use incremental diff-merge during initial full index so existing cache entries are preserved. (Done)
@@ -79,6 +79,14 @@ verification (size + hash).
 - Include filtering for status (failed/complete/active). (Done)
 - Support clearing the history list per connection. (Done)
 - Show timestamps and error details for failed entries. (Done)
+
+## Next Milestone - Code Editor Panel (Planned)
+- Add a dedicated section in the connection editor for code editor settings.
+- Support per-connection editor command and any editor-specific toggles.
+- Keep boolean options grouped at the top for quick scanning.
+- Build a built-in editor panel with a configurable editor preference (built-in vs external).
+- Provide context menu actions to open in the other editor.
+- Expose per-connection editor defaults (font size, tab size, soft tabs, word wrap).
 
 ## Release Notes / Reminders
 - Merge branch `test-feature-history` into `main` when ready and push to origin.

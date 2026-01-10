@@ -6,6 +6,7 @@ Stored in the app data directory:
 - macOS: ~/Library/Application Support/SimpleSSH/connections.json
 
 UI note: the connections drawer and editor map 1:1 to this metadata.
+Sorting note: `foldersFirst` controls whether folder entries appear before files in the column view.
 
 Example:
 ```

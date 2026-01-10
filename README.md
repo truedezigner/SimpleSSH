@@ -6,6 +6,7 @@ previews the local workspace tree. Upload queue and verification are built in.
 
 ## Current Features
 - Connections list and editor.
+- Per-connection options (remote index on connect, remote-first editing, folders-first sorting).
 - Keychain-backed password storage.
 - SSH key auth (paste private key, optional passphrase).
 - Generate RSA key pair in `~/.ssh` with a required passphrase.
@@ -24,6 +25,10 @@ previews the local workspace tree. Upload queue and verification are built in.
 - Status-strip popup with transfer history, filtering, and clear.
 - Right-click actions (open in VS Code, reveal in OS, copy paths).
 - Import/export of connection metadata.
+
+## Planned Features
+- Built-in code editor panel with per-connection preferences.
+- Keep external editor support alongside the built-in editor.
 
 ## Quick Start
 ```
@@ -44,4 +49,4 @@ npm run build:mac
 
 ## Known Gaps
 - Live sync is mtime-based (no full content diff/merge).
-- Column view filters/sorting (folders-first toggle, name/size/modified).
+- Column view filters/sorting (name/size/modified).
