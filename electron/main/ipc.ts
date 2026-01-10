@@ -13,7 +13,7 @@ import {
 } from './secretsStore'
 import { testConnection } from './sshClient'
 import { downloadRemoteFile, listLocalTree, listRemoteDir, syncRemoteToLocal } from './workspace'
-import { forceUploadAll, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
+import { forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
@@ -232,7 +232,9 @@ export function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('workspace:remoteList', async (_event, payload: { connectionId: string; path: string }) => {
+  ipcMain.handle(
+    'workspace:remoteList',
+    async (_event, payload: { connectionId: string; path: string; force?: boolean }) => {
     const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
     if (!connection) return { ok: false, message: 'Connection not found.' }
     if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
@@ -249,13 +251,16 @@ export function registerIpcHandlers() {
       auth = { privateKey, passphrase: passphrase ?? undefined }
     }
     try {
-      const nodes = await listRemoteDir(connection, auth, payload.path || connection.remoteRoot)
+      const nodes = await listRemoteDir(connection, auth, payload.path || connection.remoteRoot, {
+        force: payload.force,
+      })
       return { ok: true, message: 'Remote list loaded.', nodes }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load remote list.'
       return { ok: false, message }
     }
-  })
+  },
+  )
 
   ipcMain.handle(
     'workspace:downloadRemoteFile',
@@ -327,31 +332,45 @@ export function registerIpcHandlers() {
     return getQueueStatus(payload.connectionId)
   })
 
-  ipcMain.handle('workspace:forcePush', async (_event, payload: { connectionId: string }) => {
-    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
-    if (!connection) return { ok: false, message: 'Connection not found.' }
-    if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
-    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
-    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
-    const authType = connection.authType ?? 'password'
-    if (authType === 'password') {
-      const password = await getPassword(connection.id)
-      if (!password) return { ok: false, message: 'Missing password.' }
-      auth = { password }
-    } else {
-      const privateKey = await getPrivateKey(connection.id)
-      const passphrase = await getPassphrase(connection.id)
-      if (!privateKey) return { ok: false, message: 'Missing private key.' }
-      auth = { privateKey, passphrase: passphrase ?? undefined }
-    }
-    try {
-      const status = await forceUploadAll(connection, auth)
-      return { ok: true, message: 'Force push queued.', status }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Force push failed.'
-      return { ok: false, message }
-    }
-  })
+  ipcMain.handle(
+    'workspace:forceUploadFile',
+    async (_event, payload: { connectionId: string; path: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      const relative = path.relative(connection.localRoot, payload.path)
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+        return { ok: false, message: 'File is outside the local workspace.' }
+      }
+      try {
+        const stat = await fs.stat(payload.path)
+        if (!stat.isFile()) return { ok: false, message: 'Only files can be force uploaded.' }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'File not found.'
+        return { ok: false, message }
+      }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        const status = await forceUploadFile(connection, auth, payload.path)
+        return { ok: true, message: 'Force upload queued.', status }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Force upload failed.'
+        return { ok: false, message }
+      }
+    },
+  )
 
   ipcMain.handle(
     'workspace:openInEditor',
@@ -376,7 +395,10 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(
     'workspace:showContextMenu',
-    async (event, payload: { path: string; type: 'file' | 'dir'; codeCommand?: string }) => {
+    async (
+      event,
+      payload: { connectionId?: string; path: string; type: 'file' | 'dir'; codeCommand?: string },
+    ) => {
       if (!payload?.path) return { ok: false, message: 'No path provided.' }
       const codeCommand = payload.codeCommand?.trim() || 'code'
       const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
@@ -415,6 +437,32 @@ export function registerIpcHandlers() {
           click: () => clipboard.writeText(payload.path),
         },
       ]
+
+      if (payload.type === 'file' && payload.connectionId) {
+        template.push({
+          label: 'Force Upload File',
+          click: async () => {
+            const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+            if (!connection) return
+            if (!connection.localRoot || !connection.remoteRoot) return
+            const relative = path.relative(connection.localRoot, payload.path)
+            if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return
+            let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+            const authType = connection.authType ?? 'password'
+            if (authType === 'password') {
+              const password = await getPassword(connection.id)
+              if (!password) return
+              auth = { password }
+            } else {
+              const privateKey = await getPrivateKey(connection.id)
+              const passphrase = await getPassphrase(connection.id)
+              if (!privateKey) return
+              auth = { privateKey, passphrase: passphrase ?? undefined }
+            }
+            void forceUploadFile(connection, auth, payload.path)
+          },
+        })
+      }
 
       const menu = Menu.buildFromTemplate(template)
       menu.popup({ window })

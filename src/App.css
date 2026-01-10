@@ -237,6 +237,11 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.connection-editor {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+
 .panel-title {
   font-size: 12px;
   text-transform: uppercase;

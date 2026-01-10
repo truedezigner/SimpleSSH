@@ -22,15 +22,24 @@ interface Window {
       list: (payload: { root: string; depth?: number }) => Promise<unknown[]>
       openFolder: (payload: { root: string }) => Promise<{ ok: boolean; message: string }>
       sync: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
-      remoteList: (payload: { connectionId: string; path: string }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
+      remoteList: (payload: {
+        connectionId: string
+        path: string
+        force?: boolean
+      }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       stopWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
-      forcePush: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
+      forceUploadFile: (payload: { connectionId: string; path: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void
-      showContextMenu: (payload: { path: string; type: 'file' | 'dir'; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
+      showContextMenu: (payload: {
+        connectionId?: string
+        path: string
+        type: 'file' | 'dir'
+        codeCommand?: string
+      }) => Promise<{ ok: boolean; message: string }>
     }
   }
 }

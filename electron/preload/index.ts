@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     list: (payload: { root: string; depth?: number }) => ipcRenderer.invoke('workspace:list', payload),
     openFolder: (payload: { root: string }) => ipcRenderer.invoke('workspace:openFolder', payload),
     sync: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:sync', payload),
-    remoteList: (payload: { connectionId: string; path: string }) =>
+    remoteList: (payload: { connectionId: string; path: string; force?: boolean }) =>
       ipcRenderer.invoke('workspace:remoteList', payload),
     downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) =>
       ipcRenderer.invoke('workspace:downloadRemoteFile', payload),
@@ -32,7 +32,8 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     stopWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:stopWatch', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
-    forcePush: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:forcePush', payload),
+    forceUploadFile: (payload: { connectionId: string; path: string }) =>
+      ipcRenderer.invoke('workspace:forceUploadFile', payload),
     openInEditor: (payload: { path: string; codeCommand?: string }) =>
       ipcRenderer.invoke('workspace:openInEditor', payload),
     onQueueStatus: (handler: (status: unknown) => void) => {
@@ -40,7 +41,12 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.on('workspace:queueStatus', listener)
       return () => ipcRenderer.removeListener('workspace:queueStatus', listener)
     },
-    showContextMenu: (payload: { path: string; type: 'file' | 'dir'; codeCommand?: string }) =>
+    showContextMenu: (payload: {
+      connectionId?: string
+      path: string
+      type: 'file' | 'dir'
+      codeCommand?: string
+    }) =>
       ipcRenderer.invoke('workspace:showContextMenu', payload),
   },
 })

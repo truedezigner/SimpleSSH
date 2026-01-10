@@ -21,6 +21,9 @@ interface Connection {
   liveSyncIntervalSec: number
   hostingProvider: string
   codeCommand: string
+  remoteIndexOnConnect: boolean
+  remotePinThreshold: number
+  remotePinnedMaxEntries: number
 }
 
 interface ConnectionDraft extends Omit<Connection, 'id'> {
@@ -81,6 +84,9 @@ const defaultConnection = (): ConnectionDraft => ({
   liveSyncIntervalSec: 5,
   hostingProvider: 'none',
   codeCommand: 'code',
+  remoteIndexOnConnect: true,
+  remotePinThreshold: 3,
+  remotePinnedMaxEntries: 200,
 })
 
 const sortNodes = (nodes: FileNode[]) => {
@@ -106,6 +112,13 @@ const splitRemotePath = (value: string) => {
   const parts = normalized.split('/').filter(Boolean)
   if (normalized.startsWith('/')) return ['/', ...parts]
   return parts
+}
+
+const parentRemotePath = (value: string) => {
+  const normalized = value.replace(/\\/g, '/')
+  const lastSlash = normalized.lastIndexOf('/')
+  if (lastSlash <= 0) return normalized.startsWith('/') ? '/' : ''
+  return normalized.slice(0, lastSlash)
 }
 
 const splitLocalPath = (value: string) => {
@@ -255,10 +268,11 @@ function App() {
     setLocalSelected([])
   }
 
-  const loadRemoteRoot = async (connection: Connection) => {
+  const loadRemoteRoot = async (connection: Connection, options?: { path?: string; force?: boolean }) => {
     const response = await window.simpleSSH.workspace.remoteList({
       connectionId: connection.id,
-      path: connection.remoteRoot,
+      path: options?.path ?? connection.remoteRoot,
+      force: options?.force,
     })
     const nodes = (response?.nodes ?? []) as FileNode[]
     setRemoteColumns([sortNodes(nodes)])
@@ -401,20 +415,6 @@ function App() {
     }
   }
 
-  const handleForcePush = async () => {
-    if (!activeConnection) return
-    setWorkspaceStatus({ kind: 'info', message: 'Force push queued...' })
-    const result = await window.simpleSSH.workspace.forcePush({ connectionId: activeConnection.id })
-    if (result?.ok) {
-      setWorkspaceStatus({ kind: 'ok', message: result.message || 'Force push queued.' })
-      if (isQueueStatus(result.status)) {
-        setQueueStatusMap((prev) => ({ ...prev, [activeConnection.id]: result.status }))
-      }
-    } else {
-      setWorkspaceStatus({ kind: 'error', message: result?.message || 'Force push failed.' })
-    }
-  }
-
   const handleToggleWatcher = async () => {
     if (!activeConnection) return
     if (activeConnection.syncMode === 'manual') {
@@ -446,7 +446,14 @@ function App() {
     if (workspaceView === 'local') {
       await loadLocalRoot(activeConnection)
     } else {
-      await loadRemoteRoot(activeConnection)
+      const lastSelected = remoteSelected.filter(Boolean).slice(-1)[0]
+      const targetPath =
+        lastSelected?.type === 'dir'
+          ? lastSelected.path
+          : lastSelected?.type === 'file'
+            ? parentRemotePath(lastSelected.path) || activeConnection.remoteRoot
+            : activeConnection.remoteRoot
+      await loadRemoteRoot(activeConnection, { path: targetPath, force: true })
     }
   }
 
@@ -490,6 +497,7 @@ function App() {
   const handleShowContext = async (node: FileNode) => {
     if (!activeConnection) return
     await window.simpleSSH.workspace.showContextMenu({
+      connectionId: activeConnection.id,
       path: node.path,
       type: node.type,
       codeCommand: activeConnection.codeCommand,
@@ -577,6 +585,12 @@ function App() {
     }
     return queueStatus?.watching ? 'Sync: watching' : 'Sync: idle'
   })()
+  const queueDetailLabel = (() => {
+    if (!queueStatus?.lastPath || !queueStatus?.lastPhase) return 'Last: idle'
+    const normalized = queueStatus.lastPath.replace(/\\/g, '/')
+    const fileName = normalized.split('/').pop() ?? normalized
+    return `Last: ${queueStatus.lastPhase} ${fileName}`
+  })()
 
   return (
     <div className='app-shell'>
@@ -627,9 +641,6 @@ function App() {
         <div className='top-actions'>
           <button className='primary' onClick={handleSync} disabled={!activeConnection}>
             Sync
-          </button>
-          <button className='ghost' onClick={handleForcePush} disabled={!activeConnection}>
-            Force Push
           </button>
           <button className='ghost' onClick={handleToggleWatcher} disabled={!activeConnection}>
             {queueStatus?.watching ? 'Auto Sync On' : 'Auto Sync Off'}
@@ -712,6 +723,7 @@ function App() {
         <div className='status-chip'>
           Queue: {queueStatus ? `${queueStatus.pending} pending, ${queueStatus.active} active` : 'Idle'}
         </div>
+        <div className='status-chip'>{queueDetailLabel}</div>
         {workspaceStatus && (
           <div className={`status-chip ${workspaceStatus.kind}`}>{workspaceStatus.message}</div>
         )}
@@ -790,7 +802,7 @@ function App() {
         </div>
 
         {editorOpen && (
-          <div className='panel'>
+          <div className='panel connection-editor'>
             <div className='panel-title'>Connection Editor</div>
             <div className='grid'>
               <label>
@@ -877,6 +889,46 @@ function App() {
                     Pick
                   </button>
                 </div>
+              </label>
+              <label>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.remoteIndexOnConnect}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, remoteIndexOnConnect: event.target.checked }))
+                  }
+                />
+                Initial remote index on connect
+              </label>
+              <label>
+                Pin cache after N visits
+                <input
+                  type='number'
+                  min={1}
+                  max={50}
+                  value={connectionDraft.remotePinThreshold}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({
+                      ...prev,
+                      remotePinThreshold: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Max pinned folders
+                <input
+                  type='number'
+                  min={0}
+                  max={1000}
+                  value={connectionDraft.remotePinnedMaxEntries}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({
+                      ...prev,
+                      remotePinnedMaxEntries: Number(event.target.value),
+                    }))
+                  }
+                />
               </label>
               <label>
                 Verify Mode

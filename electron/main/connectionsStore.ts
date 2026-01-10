@@ -22,6 +22,9 @@ export interface Connection {
   liveSyncIntervalSec: number
   hostingProvider: string
   codeCommand: string
+  remoteIndexOnConnect: boolean
+  remotePinThreshold: number
+  remotePinnedMaxEntries: number
 }
 
 export interface ConnectionInput extends Omit<Connection, 'id'> {
@@ -45,6 +48,9 @@ async function readConnections(): Promise<Connection[]> {
         syncMode: 'manual' as SyncMode,
         liveSyncIntervalSec: 5,
         hostingProvider: 'none',
+        remoteIndexOnConnect: true,
+        remotePinThreshold: 3,
+        remotePinnedMaxEntries: 200,
         ...item,
       })) as Connection[]
     }
@@ -79,6 +85,9 @@ export async function upsertConnection(input: ConnectionInput) {
     syncMode: 'manual' as SyncMode,
     liveSyncIntervalSec: 5,
     hostingProvider: 'none',
+    remoteIndexOnConnect: true,
+    remotePinThreshold: 3,
+    remotePinnedMaxEntries: 200,
     ...input,
     id,
   }

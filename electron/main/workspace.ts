@@ -12,6 +12,21 @@ export interface FileNode {
   children?: FileNode[]
 }
 
+interface RemoteCacheEntry {
+  nodes: FileNode[]
+  fetchedAt: number
+  lastAccess: number
+}
+
+const REMOTE_CACHE_MAX_ENTRIES = 800
+const DEFAULT_PIN_THRESHOLD = 3
+const DEFAULT_PINNED_MAX_ENTRIES = 200
+const remoteCache = new Map<string, RemoteCacheEntry>()
+const remoteAccessCounts = new Map<string, number>()
+const remotePinned = new Set<string>()
+const remoteIndexState = new Map<string, Promise<void>>()
+const remoteIndexedConnections = new Set<string>()
+
 export async function listLocalTree(root: string, depth = 2): Promise<FileNode[]> {
   if (!root) return []
   try {
@@ -41,6 +56,189 @@ async function ensureDir(target: string) {
 function remoteJoin(...parts: string[]) {
   return path.posix.join(...parts)
 }
+
+function cacheKey(connection: Connection, remotePath: string) {
+  return `${connection.id}:${remotePath}`
+}
+
+function getCachedDir(connection: Connection, remotePath: string) {
+  const entry = remoteCache.get(cacheKey(connection, remotePath))
+  if (!entry) return null
+  return { entry }
+}
+
+function setCachedDir(connection: Connection, remotePath: string, nodes: FileNode[]) {
+  const key = cacheKey(connection, remotePath)
+  const now = Date.now()
+  const existing = remoteCache.get(key)
+  remoteCache.set(key, {
+    nodes,
+    fetchedAt: now,
+    lastAccess: existing?.lastAccess ?? now,
+  })
+  evictCacheEntries()
+}
+
+function updateCachedDirByDiff(connection: Connection, remotePath: string, nodes: FileNode[]) {
+  const key = cacheKey(connection, remotePath)
+  const existing = remoteCache.get(key)
+  if (!existing) {
+    setCachedDir(connection, remotePath, nodes)
+    return
+  }
+  const currentByPath = new Map(existing.nodes.map((node) => [node.path, node]))
+  const merged: FileNode[] = nodes.map((next) => {
+    const prior = currentByPath.get(next.path)
+    if (prior && prior.type === next.type && prior.size === next.size) {
+      return prior
+    }
+    return next
+  })
+  remoteCache.set(key, {
+    nodes: merged,
+    fetchedAt: Date.now(),
+    lastAccess: existing.lastAccess,
+  })
+  evictCacheEntries()
+}
+
+function markAccess(connection: Connection, remotePath: string) {
+  const key = cacheKey(connection, remotePath)
+  const next = (remoteAccessCounts.get(key) ?? 0) + 1
+  remoteAccessCounts.set(key, next)
+  const threshold =
+    typeof connection.remotePinThreshold === 'number' && !Number.isNaN(connection.remotePinThreshold)
+      ? Math.max(1, connection.remotePinThreshold)
+      : DEFAULT_PIN_THRESHOLD
+  if (next >= threshold) {
+    remotePinned.add(key)
+    enforcePinnedLimit(connection)
+  }
+}
+
+function enforcePinnedLimit(connection: Connection) {
+  const maxEntries =
+    typeof connection.remotePinnedMaxEntries === 'number' && !Number.isNaN(connection.remotePinnedMaxEntries)
+      ? Math.max(0, connection.remotePinnedMaxEntries)
+      : DEFAULT_PINNED_MAX_ENTRIES
+  if (maxEntries <= 0) return
+  const prefix = `${connection.id}:`
+  const pinnedForConnection = Array.from(remotePinned).filter((key) => key.startsWith(prefix))
+  while (pinnedForConnection.length > maxEntries) {
+    let candidateIndex = -1
+    let candidateAccess = Infinity
+    for (let i = 0; i < pinnedForConnection.length; i += 1) {
+      const key = pinnedForConnection[i]
+      const entry = remoteCache.get(key)
+      const lastAccess = entry?.lastAccess ?? 0
+      if (lastAccess < candidateAccess) {
+        candidateAccess = lastAccess
+        candidateIndex = i
+      }
+    }
+    if (candidateIndex < 0) break
+    const [candidateKey] = pinnedForConnection.splice(candidateIndex, 1)
+    if (candidateKey) remotePinned.delete(candidateKey)
+  }
+}
+
+function evictCacheEntries() {
+  while (remoteCache.size > REMOTE_CACHE_MAX_ENTRIES) {
+    let candidateKey: string | null = null
+    let candidateAccess = Infinity
+    for (const [key, entry] of remoteCache.entries()) {
+      if (remotePinned.has(key)) continue
+      if (entry.lastAccess < candidateAccess) {
+        candidateAccess = entry.lastAccess
+        candidateKey = key
+      }
+    }
+    if (!candidateKey) {
+      for (const [key, entry] of remoteCache.entries()) {
+        if (entry.lastAccess < candidateAccess) {
+          candidateAccess = entry.lastAccess
+          candidateKey = key
+        }
+      }
+      if (!candidateKey) break
+      remotePinned.delete(candidateKey)
+    }
+    const timer = remoteRefreshTimers.get(candidateKey)
+    if (timer) {
+      clearTimeout(timer)
+      remoteRefreshTimers.delete(candidateKey)
+    }
+    remoteCache.delete(candidateKey)
+  }
+}
+
+function readDir(sftp: SFTPWrapper, remotePath: string) {
+  return new Promise<SFTPWrapper.FileEntry[]>((resolve, reject) => {
+    sftp.readdir(remotePath, (err, list) => {
+      if (err) reject(err)
+      else resolve(list)
+    })
+  })
+}
+
+async function fetchRemoteDir(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  remotePath: string,
+) {
+  return withSftp(connection, auth, async (sftp) => {
+    const entries = await readDir(sftp, remotePath)
+    return entries.map((entry) => ({
+      name: entry.filename,
+      path: remoteJoin(remotePath, entry.filename),
+      type: entry.attrs.isDirectory() ? 'dir' : 'file',
+      size: entry.attrs.size,
+    })) as FileNode[]
+  })
+}
+
+async function indexRemoteTree(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+) {
+  const connectionKey = connection.id
+  if (remoteIndexedConnections.has(connectionKey)) return
+  if (remoteIndexState.has(connectionKey)) return
+  const run = withSftp(connection, auth, async (sftp) => {
+    const queue: string[] = [connection.remoteRoot]
+    while (queue.length > 0) {
+      const current = queue.shift()
+      if (!current) continue
+      try {
+        const entries = await readDir(sftp, current)
+        const nodes = entries.map((entry) => ({
+          name: entry.filename,
+          path: remoteJoin(current, entry.filename),
+          type: entry.attrs.isDirectory() ? 'dir' : 'file',
+          size: entry.attrs.size,
+        })) as FileNode[]
+        setCachedDir(connection, current, nodes)
+        for (const entry of entries) {
+          if (entry.attrs.isDirectory()) {
+            queue.push(remoteJoin(current, entry.filename))
+          }
+        }
+      } catch {
+        // skip paths that fail during initial index
+      }
+    }
+  })
+    .then(() => {
+      remoteIndexState.delete(connectionKey)
+      remoteIndexedConnections.add(connectionKey)
+    })
+    .catch(() => {
+      remoteIndexState.delete(connectionKey)
+    })
+  remoteIndexState.set(connectionKey, run)
+  await run
+}
+
 
 async function downloadFile(sftp: SFTPWrapper, remoteFile: string, localFile: string) {
   await ensureDir(path.dirname(localFile))
@@ -175,21 +373,29 @@ export async function listRemoteDir(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
   remotePath: string,
+  options?: { force?: boolean },
 ) {
-  return withSftp(connection, auth, async (sftp) => {
-    const entries = await new Promise<SFTPWrapper.FileEntry[]>((resolve, reject) => {
-      sftp.readdir(remotePath, (err, list) => {
-        if (err) reject(err)
-        else resolve(list)
-      })
-    })
-    return entries.map((entry) => ({
-      name: entry.filename,
-      path: remoteJoin(remotePath, entry.filename),
-      type: entry.attrs.isDirectory() ? 'dir' : 'file',
-      size: entry.attrs.size,
-    })) as FileNode[]
-  })
+  const cached = getCachedDir(connection, remotePath)
+  markAccess(connection, remotePath)
+  if (options?.force) {
+    const nodes = await fetchRemoteDir(connection, auth, remotePath)
+    updateCachedDirByDiff(connection, remotePath, nodes)
+    if (connection.remoteIndexOnConnect) {
+      void indexRemoteTree(connection, auth)
+    }
+    return nodes
+  }
+  if (cached) {
+    cached.entry.lastAccess = Date.now()
+    return cached.entry.nodes
+  }
+
+  const nodes = await fetchRemoteDir(connection, auth, remotePath)
+  setCachedDir(connection, remotePath, nodes)
+  if (connection.remoteIndexOnConnect) {
+    void indexRemoteTree(connection, auth)
+  }
+  return nodes
 }
 
 export async function downloadRemoteFile(

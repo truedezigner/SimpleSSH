@@ -60,3 +60,10 @@ verification (size + hash).
 ## Known Gaps / TODO
 - Transfer queue has no dedicated history panel (status bar summary only).
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
+
+## Upcoming Plan - Remote Cache Indexing
+- Use incremental diff-merge during initial full index so existing cache entries are preserved.
+- Ensure refresh only updates the current folder cache (add/remove/update) without touching other cached paths.
+- Keep cache pinned by visit frequency and respect per-connection settings for pin thresholds and max pinned entries.
+- Add a manual "Refresh this folder" action in the remote context menu (optional UX polish).
+- Add a per-connection "Rebuild remote index" button in the connection editor.

@@ -728,34 +728,13 @@ export async function stopWatcher(connectionId: string) {
   return entry.status
 }
 
-async function listLocalFiles(root: string) {
-  const results: string[] = []
-  const walk = async (dir: string) => {
-    const entries = await fs.readdir(dir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.name === 'node_modules') continue
-      if (entry.name === '.git' || entry.name === '.svn' || entry.name === '.hg') continue
-      const fullPath = path.join(dir, entry.name)
-      if (entry.isDirectory()) {
-        await walk(fullPath)
-      } else if (entry.isFile()) {
-        results.push(fullPath)
-      }
-    }
-  }
-  await walk(root)
-  return results
-}
-
-export async function forceUploadAll(
+export async function forceUploadFile(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
+  localPath: string,
 ) {
   const entry = await ensureEntry(connection, auth, { watch: false })
-  const files = await listLocalFiles(connection.localRoot)
-  for (const file of files) {
-    enqueueUpload(entry, file, { force: true })
-  }
+  enqueueUpload(entry, localPath, { force: true })
   refreshQueueCounts(entry)
   if (!entry.watcher) {
     void entry.queue.onIdle().then(() => {
