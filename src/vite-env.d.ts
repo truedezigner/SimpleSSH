@@ -26,6 +26,7 @@ interface Window {
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       stopWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
+      forcePush: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void

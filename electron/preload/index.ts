@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     stopWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:stopWatch', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
+    forcePush: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:forcePush', payload),
     openInEditor: (payload: { path: string; codeCommand?: string }) =>
       ipcRenderer.invoke('workspace:openInEditor', payload),
     onQueueStatus: (handler: (status: unknown) => void) => {

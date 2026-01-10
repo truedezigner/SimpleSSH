@@ -13,7 +13,7 @@ import {
 } from './secretsStore'
 import { testConnection } from './sshClient'
 import { downloadRemoteFile, listLocalTree, listRemoteDir, syncRemoteToLocal } from './workspace'
-import { getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
+import { forceUploadAll, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
@@ -325,6 +325,32 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('workspace:getQueueStatus', async (_event, payload: { connectionId: string }) => {
     return getQueueStatus(payload.connectionId)
+  })
+
+  ipcMain.handle('workspace:forcePush', async (_event, payload: { connectionId: string }) => {
+    const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+    if (!connection) return { ok: false, message: 'Connection not found.' }
+    if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+    if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+    let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+    const authType = connection.authType ?? 'password'
+    if (authType === 'password') {
+      const password = await getPassword(connection.id)
+      if (!password) return { ok: false, message: 'Missing password.' }
+      auth = { password }
+    } else {
+      const privateKey = await getPrivateKey(connection.id)
+      const passphrase = await getPassphrase(connection.id)
+      if (!privateKey) return { ok: false, message: 'Missing private key.' }
+      auth = { privateKey, passphrase: passphrase ?? undefined }
+    }
+    try {
+      const status = await forceUploadAll(connection, auth)
+      return { ok: true, message: 'Force push queued.', status }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Force push failed.'
+      return { ok: false, message }
+    }
   })
 
   ipcMain.handle(
