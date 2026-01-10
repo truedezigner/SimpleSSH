@@ -9,9 +9,9 @@ status feedback.
 ```
 Renderer (React UI)
   - Connections list + editor
-  - Workspace column file explorer with badges
+  - Workspace column file explorer with badges + inline create/rename/delete
   - Top bar actions (sync, force push, auto sync, reload)
-  - Bottom status bar (connection, roots, sync, queue)
+  - Bottom status bar (connection, roots, sync, queue) + transfer history popup
         |
         +-- IPC
 Main (Electron/Node)
@@ -41,6 +41,7 @@ Main (Electron/Node)
 - Pick a local workspace folder.
 - Trigger remote sync and reload the active tree view.
 - Show status for test and sync operations.
+- Provide column-view actions (new file/folder, rename, delete) for local + remote.
 
 ## Key Modules (Current)
 - `electron/main/connectionsStore.ts`: JSON metadata storage.
@@ -53,5 +54,4 @@ Main (Electron/Node)
 - `src/App.tsx`: connections UI, workspace preview, actions.
 
 ## Gaps / Not Implemented Yet
-- Transfer queue has no dedicated history panel (status bar summary only).
 - Live sync uses mtime comparisons rather than content merging.

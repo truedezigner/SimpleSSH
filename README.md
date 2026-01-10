@@ -15,6 +15,8 @@ previews the local workspace tree. Upload queue and verification are built in.
 - Remote file browser (column view + double-click download).
 - Remote-first editing (download to cache + auto-upload on save, with superseded-save handling).
 - Local workspace column view (lazy folder expansion).
+- Inline create/rename for local and remote items in the column view.
+- Context menu actions: new file/folder, rename, delete (local + remote).
 - Auto-upload watcher with queued uploads (includes deletes + verification).
 - Live sync mode (polls remote + last-write-wins resolution).
 - Force push to upload local workspace in bulk.
@@ -42,3 +44,4 @@ npm run build:mac
 
 ## Known Gaps
 - Live sync is mtime-based (no full content diff/merge).
+- Column view filters/sorting (folders-first toggle, name/size/modified).

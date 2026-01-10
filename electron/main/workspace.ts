@@ -195,6 +195,74 @@ function readDir(sftp: SFTPWrapper, remotePath: string) {
   })
 }
 
+function sftpStat(sftp: SFTPWrapper, targetPath: string) {
+  return new Promise<SFTPWrapper.Attributes>((resolve, reject) => {
+    sftp.stat(targetPath, (err, stats) => {
+      if (err) reject(err)
+      else resolve(stats)
+    })
+  })
+}
+
+function sftpMkdir(sftp: SFTPWrapper, targetPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    sftp.mkdir(targetPath, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+function sftpCreateEmptyFile(sftp: SFTPWrapper, targetPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    sftp.open(targetPath, 'w', (err, handle) => {
+      if (err) {
+        reject(err)
+        return
+      }
+      sftp.close(handle, (closeErr) => {
+        if (closeErr) reject(closeErr)
+        else resolve()
+      })
+    })
+  })
+}
+
+function sftpRename(sftp: SFTPWrapper, fromPath: string, toPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    sftp.rename(fromPath, toPath, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+function sftpUnlink(sftp: SFTPWrapper, targetPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    sftp.unlink(targetPath, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+function sftpRmdir(sftp: SFTPWrapper, targetPath: string) {
+  return new Promise<void>((resolve, reject) => {
+    sftp.rmdir(targetPath, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+function isMissingRemoteEntry(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const code = (error as { code?: number }).code
+  if (code === 2) return true
+  const message = (error as { message?: string }).message
+  return typeof message === 'string' && message.toLowerCase().includes('no such file')
+}
+
 async function fetchRemoteDir(
   connection: Connection,
   auth: { password?: string; privateKey?: string; passphrase?: string },
@@ -571,4 +639,138 @@ export async function downloadRemoteFileToCache(
   })
   recordCacheEntry(connection.id, remotePath, savedPath)
   return savedPath
+}
+
+export async function createRemoteItem(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  parentPath: string,
+  name: string,
+  type: 'file' | 'dir',
+) {
+  const trimmedName = name.trim()
+  if (!trimmedName) throw new Error('Name is required.')
+  if (/[/\\]/.test(trimmedName)) throw new Error('Name cannot include slashes.')
+  if (trimmedName === '.' || trimmedName === '..') throw new Error('Invalid name.')
+  const normalizedParent = parentPath.replace(/\\/g, '/')
+  const isRoot = normalizedParent === connection.remoteRoot
+  const relative = remoteRelative(connection.remoteRoot, normalizedParent)
+  if (!isRoot && !relative) {
+    throw new Error('Remote path is outside the connection root.')
+  }
+  const targetPath = remoteJoin(normalizedParent, trimmedName)
+
+  return withSftp(connection, auth, async (sftp) => {
+    try {
+      const parentStat = await sftpStat(sftp, normalizedParent)
+      if (!parentStat.isDirectory()) {
+        throw new Error('Parent path is not a directory.')
+      }
+    } catch (error) {
+      if (isMissingRemoteEntry(error)) {
+        throw new Error('Parent folder not found.')
+      }
+      throw error
+    }
+
+    try {
+      await sftpStat(sftp, targetPath)
+      throw new Error('Item already exists.')
+    } catch (error) {
+      if (!isMissingRemoteEntry(error)) throw error
+    }
+
+    if (type === 'dir') {
+      await sftpMkdir(sftp, targetPath)
+    } else {
+      await sftpCreateEmptyFile(sftp, targetPath)
+    }
+    return targetPath
+  })
+}
+
+export async function renameRemoteItem(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  targetPath: string,
+  name: string,
+) {
+  const trimmedName = name.trim()
+  if (!trimmedName) throw new Error('Name is required.')
+  if (/[/\\]/.test(trimmedName)) throw new Error('Name cannot include slashes.')
+  if (trimmedName === '.' || trimmedName === '..') throw new Error('Invalid name.')
+  const normalizedTarget = targetPath.replace(/\\/g, '/')
+  const relative = remoteRelative(connection.remoteRoot, normalizedTarget)
+  if (!relative) {
+    throw new Error('Remote path is outside the connection root.')
+  }
+  const parentPath = path.posix.dirname(normalizedTarget)
+  const nextPath = remoteJoin(parentPath, trimmedName)
+
+  return withSftp(connection, auth, async (sftp) => {
+    try {
+      await sftpStat(sftp, normalizedTarget)
+    } catch (error) {
+      if (isMissingRemoteEntry(error)) {
+        throw new Error('Item not found.')
+      }
+      throw error
+    }
+
+    try {
+      await sftpStat(sftp, nextPath)
+      throw new Error('Item already exists.')
+    } catch (error) {
+      if (!isMissingRemoteEntry(error)) throw error
+    }
+
+    await sftpRename(sftp, normalizedTarget, nextPath)
+    return nextPath
+  })
+}
+
+async function deleteRemoteDirectory(sftp: SFTPWrapper, targetPath: string) {
+  const entries = await readDir(sftp, targetPath)
+  for (const entry of entries) {
+    const entryPath = remoteJoin(targetPath, entry.filename)
+    if (entry.attrs.isDirectory()) {
+      await deleteRemoteDirectory(sftp, entryPath)
+    } else {
+      await sftpUnlink(sftp, entryPath)
+    }
+  }
+  await sftpRmdir(sftp, targetPath)
+}
+
+export async function deleteRemoteItem(
+  connection: Connection,
+  auth: { password?: string; privateKey?: string; passphrase?: string },
+  targetPath: string,
+) {
+  const normalizedTarget = targetPath.replace(/\\/g, '/')
+  if (normalizedTarget === connection.remoteRoot) {
+    throw new Error('Cannot delete the connection root.')
+  }
+  const relative = remoteRelative(connection.remoteRoot, normalizedTarget)
+  if (!relative) {
+    throw new Error('Remote path is outside the connection root.')
+  }
+
+  return withSftp(connection, auth, async (sftp) => {
+    let stats: SFTPWrapper.Attributes
+    try {
+      stats = await sftpStat(sftp, normalizedTarget)
+    } catch (error) {
+      if (isMissingRemoteEntry(error)) {
+        throw new Error('Item not found.')
+      }
+      throw error
+    }
+    if (stats.isDirectory()) {
+      await deleteRemoteDirectory(sftp, normalizedTarget)
+    } else {
+      await sftpUnlink(sftp, normalizedTarget)
+    }
+    return normalizedTarget
+  })
 }

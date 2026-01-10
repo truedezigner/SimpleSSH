@@ -30,6 +30,7 @@ verification (size + hash).
 - Local file explorer (column view). (Done)
 - Context menu actions (open in VS Code, reveal in OS, copy path). (Done)
 - Remote browser: lazy folder expansion + double-click download. (Done)
+- Create/rename/delete local + remote items from the column view. (Done)
 
 ### Milestone 3 - Auto-Upload + Queue (Done)
 - File watcher on local workspace. (Done)
@@ -59,6 +60,7 @@ verification (size + hash).
 
 ## Known Gaps / TODO
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
+- Column view filters/sorting (folders-first toggle, name/size/modified).
 
 ## Upcoming Plan - Remote Cache Indexing
 - Use incremental diff-merge during initial full index so existing cache entries are preserved. (Done)

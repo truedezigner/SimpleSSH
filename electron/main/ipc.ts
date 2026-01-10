@@ -18,6 +18,9 @@ import {
   listLocalTree,
   listRemoteDir,
   rebuildRemoteIndex,
+  createRemoteItem,
+  renameRemoteItem,
+  deleteRemoteItem,
   refreshRemoteTree,
   syncRemoteToLocal,
 } from './workspace'
@@ -464,6 +467,222 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.handle(
+    'workspace:createLocalItem',
+    async (
+      _event,
+      payload: { connectionId: string; parentPath: string; name: string; type: 'file' | 'dir' },
+    ) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      const parentPath = payload.parentPath
+      if (!parentPath) return { ok: false, message: 'No parent path provided.' }
+      const relativeParent = path.relative(connection.localRoot, parentPath)
+      if (relativeParent.startsWith('..') || path.isAbsolute(relativeParent)) {
+        return { ok: false, message: 'Folder is outside the local workspace.' }
+      }
+      const trimmedName = payload.name?.trim()
+      if (!trimmedName) return { ok: false, message: 'Name is required.' }
+      if (/[/\\]/.test(trimmedName)) return { ok: false, message: 'Name cannot include slashes.' }
+      if (trimmedName === '.' || trimmedName === '..') return { ok: false, message: 'Invalid name.' }
+      const targetPath = path.join(parentPath, trimmedName)
+
+      try {
+        const parentStat = await fs.stat(parentPath)
+        if (!parentStat.isDirectory()) return { ok: false, message: 'Parent path is not a directory.' }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Parent folder not found.'
+        return { ok: false, message }
+      }
+
+      try {
+        await fs.stat(targetPath)
+        return { ok: false, message: 'Item already exists.' }
+      } catch {
+        // continue when not found
+      }
+
+      try {
+        if (payload.type === 'dir') {
+          await fs.mkdir(targetPath)
+          return { ok: true, message: 'Folder created.', path: targetPath }
+        }
+        const handle = await fs.open(targetPath, 'wx')
+        await handle.close()
+        return { ok: true, message: 'File created.', path: targetPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:createRemoteItem',
+    async (
+      _event,
+      payload: { connectionId: string; parentPath: string; name: string; type: 'file' | 'dir' },
+    ) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        const createdPath = await createRemoteItem(
+          connection,
+          auth,
+          payload.parentPath,
+          payload.name,
+          payload.type,
+        )
+        const label = payload.type === 'dir' ? 'Folder created.' : 'File created.'
+        return { ok: true, message: label, path: createdPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create remote item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:renameLocalItem',
+    async (_event, payload: { connectionId: string; path: string; name: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      if (!payload.path) return { ok: false, message: 'No path provided.' }
+      const relative = path.relative(connection.localRoot, payload.path)
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+        return { ok: false, message: 'Item is outside the local workspace.' }
+      }
+      const trimmedName = payload.name?.trim()
+      if (!trimmedName) return { ok: false, message: 'Name is required.' }
+      if (/[/\\]/.test(trimmedName)) return { ok: false, message: 'Name cannot include slashes.' }
+      if (trimmedName === '.' || trimmedName === '..') return { ok: false, message: 'Invalid name.' }
+      const parentPath = path.dirname(payload.path)
+      const nextPath = path.join(parentPath, trimmedName)
+
+      try {
+        await fs.stat(payload.path)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Item not found.'
+        return { ok: false, message }
+      }
+
+      try {
+        await fs.stat(nextPath)
+        return { ok: false, message: 'Item already exists.' }
+      } catch {
+        // continue when not found
+      }
+
+      try {
+        await fs.rename(payload.path, nextPath)
+        return { ok: true, message: 'Item renamed.', path: nextPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to rename item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:renameRemoteItem',
+    async (_event, payload: { connectionId: string; path: string; name: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        const renamedPath = await renameRemoteItem(connection, auth, payload.path, payload.name)
+        return { ok: true, message: 'Item renamed.', path: renamedPath }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to rename remote item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:deleteLocalItem',
+    async (_event, payload: { connectionId: string; path: string; type?: 'file' | 'dir' }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      if (!payload.path) return { ok: false, message: 'No path provided.' }
+      if (payload.path === connection.localRoot) {
+        return { ok: false, message: 'Cannot delete the workspace root.' }
+      }
+      const relative = path.relative(connection.localRoot, payload.path)
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+        return { ok: false, message: 'Item is outside the local workspace.' }
+      }
+      try {
+        const stats = await fs.stat(payload.path)
+        if (stats.isDirectory()) {
+          await fs.rm(payload.path, { recursive: true })
+        } else {
+          await fs.unlink(payload.path)
+        }
+        return { ok: true, message: 'Item deleted.' }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:deleteRemoteItem',
+    async (_event, payload: { connectionId: string; path: string }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+      try {
+        await deleteRemoteItem(connection, auth, payload.path)
+        return { ok: true, message: 'Item deleted.' }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete remote item.'
+        return { ok: false, message }
+      }
+    },
+  )
+
+  ipcMain.handle(
     'workspace:forceUploadFile',
     async (_event, payload: { connectionId: string; path: string }) => {
       const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
@@ -533,7 +752,53 @@ export function registerIpcHandlers() {
       if (!payload?.path) return { ok: false, message: 'No path provided.' }
       const codeCommand = payload.codeCommand?.trim() || 'code'
       const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const parentPath = payload.type === 'dir' ? payload.path : path.dirname(payload.path)
       const template = [
+        {
+          label: 'New File',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:createItemPrompt', {
+              scope: 'local',
+              parentPath,
+              type: 'file',
+            })
+          },
+        },
+        {
+          label: 'New Folder',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:createItemPrompt', {
+              scope: 'local',
+              parentPath,
+              type: 'dir',
+            })
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Rename',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:renameItemPrompt', {
+              scope: 'local',
+              path: payload.path,
+            })
+          },
+        },
+        {
+          label: 'Delete',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:deleteItemPrompt', {
+              scope: 'local',
+              path: payload.path,
+              type: payload.type,
+            })
+          },
+        },
+        { type: 'separator' },
         {
           label: `Open in ${codeCommand}`,
           click: () => {
@@ -610,10 +875,57 @@ export function registerIpcHandlers() {
       if (!payload?.path) return { ok: false, message: 'No path provided.' }
       const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
       const normalizedPath = payload.path.replace(/\\/g, '/')
+      const parentPath =
+        payload.type === 'dir' ? normalizedPath : path.posix.dirname(normalizedPath)
       const refreshTarget =
         payload.type === 'dir' ? normalizedPath : path.posix.dirname(normalizedPath)
       const refreshLabel = payload.type === 'dir' ? 'Refresh this folder' : 'Refresh parent folder'
       const template = [
+        {
+          label: 'New File',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:createItemPrompt', {
+              scope: 'remote',
+              parentPath,
+              type: 'file',
+            })
+          },
+        },
+        {
+          label: 'New Folder',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:createItemPrompt', {
+              scope: 'remote',
+              parentPath,
+              type: 'dir',
+            })
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Rename',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:renameItemPrompt', {
+              scope: 'remote',
+              path: normalizedPath,
+            })
+          },
+        },
+        {
+          label: 'Delete',
+          click: () => {
+            if (!window) return
+            window.webContents.send('workspace:deleteItemPrompt', {
+              scope: 'remote',
+              path: normalizedPath,
+              type: payload.type,
+            })
+          },
+        },
+        { type: 'separator' },
         {
           label: refreshLabel,
           click: () => {

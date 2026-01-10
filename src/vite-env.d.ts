@@ -29,6 +29,22 @@ interface Window {
         skipIndex?: boolean
       }) => Promise<{ ok: boolean; message: string; nodes?: unknown[] }>
       rebuildRemoteIndex: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
+      createLocalItem: (payload: {
+        connectionId: string
+        parentPath: string
+        name: string
+        type: 'file' | 'dir'
+      }) => Promise<{ ok: boolean; message: string; path?: string }>
+      createRemoteItem: (payload: {
+        connectionId: string
+        parentPath: string
+        name: string
+        type: 'file' | 'dir'
+      }) => Promise<{ ok: boolean; message: string; path?: string }>
+      renameLocalItem: (payload: { connectionId: string; path: string; name: string }) => Promise<{ ok: boolean; message: string; path?: string }>
+      renameRemoteItem: (payload: { connectionId: string; path: string; name: string }) => Promise<{ ok: boolean; message: string; path?: string }>
+      deleteLocalItem: (payload: { connectionId: string; path: string; type?: 'file' | 'dir' }) => Promise<{ ok: boolean; message: string }>
+      deleteRemoteItem: (payload: { connectionId: string; path: string }) => Promise<{ ok: boolean; message: string }>
       downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       downloadRemoteFileToCache: (payload: { connectionId: string; remotePath: string }) => Promise<{ ok: boolean; message: string; localPath?: string }>
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
@@ -51,6 +67,11 @@ interface Window {
         path: string
         type: 'file' | 'dir'
       }) => Promise<{ ok: boolean; message: string }>
+      onCreateItemPrompt: (
+        handler: (payload: { scope: 'local' | 'remote'; parentPath: string; type: 'file' | 'dir' }) => void,
+      ) => () => void
+      onRenameItemPrompt: (handler: (payload: { scope: 'local' | 'remote'; path: string }) => void) => () => void
+      onDeleteItemPrompt: (handler: (payload: { scope: 'local' | 'remote'; path: string; type?: 'file' | 'dir' }) => void) => () => void
       onRemoteRefresh: (handler: (payload: { connectionId: string; remotePath: string }) => void) => () => void
     }
   }

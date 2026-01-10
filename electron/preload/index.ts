@@ -28,6 +28,18 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.invoke('workspace:remoteList', payload),
     rebuildRemoteIndex: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:rebuildRemoteIndex', payload),
+    createLocalItem: (payload: { connectionId: string; parentPath: string; name: string; type: 'file' | 'dir' }) =>
+      ipcRenderer.invoke('workspace:createLocalItem', payload),
+    createRemoteItem: (payload: { connectionId: string; parentPath: string; name: string; type: 'file' | 'dir' }) =>
+      ipcRenderer.invoke('workspace:createRemoteItem', payload),
+    renameLocalItem: (payload: { connectionId: string; path: string; name: string }) =>
+      ipcRenderer.invoke('workspace:renameLocalItem', payload),
+    renameRemoteItem: (payload: { connectionId: string; path: string; name: string }) =>
+      ipcRenderer.invoke('workspace:renameRemoteItem', payload),
+    deleteLocalItem: (payload: { connectionId: string; path: string; type?: 'file' | 'dir' }) =>
+      ipcRenderer.invoke('workspace:deleteLocalItem', payload),
+    deleteRemoteItem: (payload: { connectionId: string; path: string }) =>
+      ipcRenderer.invoke('workspace:deleteRemoteItem', payload),
     downloadRemoteFile: (payload: { connectionId: string; remotePath: string }) =>
       ipcRenderer.invoke('workspace:downloadRemoteFile', payload),
     downloadRemoteFileToCache: (payload: { connectionId: string; remotePath: string }) =>
@@ -63,6 +75,34 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.invoke('workspace:showContextMenu', payload),
     showRemoteContextMenu: (payload: { connectionId: string; path: string; type: 'file' | 'dir' }) =>
       ipcRenderer.invoke('workspace:showRemoteContextMenu', payload),
+    onCreateItemPrompt: (
+      handler: (payload: { scope: 'local' | 'remote'; parentPath: string; type: 'file' | 'dir' }) => void,
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: { scope: 'local' | 'remote'; parentPath: string; type: 'file' | 'dir' },
+      ) => handler(payload)
+      ipcRenderer.on('workspace:createItemPrompt', listener)
+      return () => ipcRenderer.removeListener('workspace:createItemPrompt', listener)
+    },
+    onRenameItemPrompt: (handler: (payload: { scope: 'local' | 'remote'; path: string }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: { scope: 'local' | 'remote'; path: string },
+      ) => handler(payload)
+      ipcRenderer.on('workspace:renameItemPrompt', listener)
+      return () => ipcRenderer.removeListener('workspace:renameItemPrompt', listener)
+    },
+    onDeleteItemPrompt: (
+      handler: (payload: { scope: 'local' | 'remote'; path: string; type?: 'file' | 'dir' }) => void,
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: { scope: 'local' | 'remote'; path: string; type?: 'file' | 'dir' },
+      ) => handler(payload)
+      ipcRenderer.on('workspace:deleteItemPrompt', listener)
+      return () => ipcRenderer.removeListener('workspace:deleteItemPrompt', listener)
+    },
     onRemoteRefresh: (handler: (payload: { connectionId: string; remotePath: string }) => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,

@@ -71,6 +71,23 @@ interface StatusMessage {
   message: string
 }
 
+interface CreateDraft {
+  scope: 'local' | 'remote'
+  parentPath: string
+  columnIndex: number
+  type: 'file' | 'dir'
+  name: string
+}
+
+interface RenameDraft {
+  scope: 'local' | 'remote'
+  path: string
+  columnIndex: number
+  type: 'file' | 'dir'
+  name: string
+  originalName: string
+}
+
 const defaultConnection = (): ConnectionDraft => ({
   name: '',
   host: '',
@@ -180,6 +197,14 @@ function App() {
   const [workspaceView, setWorkspaceView] = useState<'local' | 'remote'>('remote')
   const [queuePanelOpen, setQueuePanelOpen] = useState(false)
   const [queueFilter, setQueueFilter] = useState<'all' | 'active' | 'failed' | 'complete'>('all')
+  const [addMenuColumnIndex, setAddMenuColumnIndex] = useState<number | null>(null)
+  const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null)
+  const [renameDraft, setRenameDraft] = useState<RenameDraft | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    scope: 'local' | 'remote'
+    path: string
+    type?: 'file' | 'dir'
+  } | null>(null)
 
   const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft>(defaultConnection())
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({})
@@ -214,6 +239,9 @@ function App() {
   const activeConnectionRef = useRef<Connection | null>(null)
   const connectionDraftIdRef = useRef<string | null>(null)
   const remoteSelectedRef = useRef<(FileNode | null)[]>([])
+  const addMenuRef = useRef<HTMLDivElement | null>(null)
+  const createDraftInputRef = useRef<HTMLInputElement | null>(null)
+  const renameDraftInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     activeConnectionIdRef.current = activeConnectionId
@@ -230,6 +258,41 @@ function App() {
   useEffect(() => {
     remoteSelectedRef.current = remoteSelected
   }, [remoteSelected])
+
+  useEffect(() => {
+    if (addMenuColumnIndex === null) return
+    const handleClick = (event: MouseEvent) => {
+      if (!addMenuRef.current) return
+      if (!addMenuRef.current.contains(event.target as Node)) {
+        setAddMenuColumnIndex(null)
+      }
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAddMenuColumnIndex(null)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [addMenuColumnIndex])
+
+  useEffect(() => {
+    setAddMenuColumnIndex(null)
+  }, [workspaceView, activeConnectionId])
+
+  useEffect(() => {
+    setCreateDraft(null)
+  }, [workspaceView, activeConnectionId])
+
+  useEffect(() => {
+    setRenameDraft(null)
+  }, [workspaceView, activeConnectionId])
+
+  useEffect(() => {
+    setDeleteConfirm(null)
+  }, [workspaceView, activeConnectionId])
 
   useEffect(() => {
     const unsubscribe = window.simpleSSH.workspace.onQueueStatus((status) => {
@@ -539,6 +602,17 @@ function App() {
     setRemoteSelected((prev) => prev.slice(0, selectedIndex + 1))
   }
 
+  const refreshLocalFolder = async (targetPath: string, columnIndex: number) => {
+    const children = await window.simpleSSH.workspace.list({ root: targetPath, depth: 1 })
+    const sorted = sortNodes((children ?? []) as FileNode[])
+    setLocalColumns((prev) => {
+      const safeIndex = Math.max(0, Math.min(columnIndex, prev.length - 1))
+      const base = prev.slice(0, safeIndex)
+      return [...base, sorted]
+    })
+    setLocalSelected((prev) => prev.slice(0, Math.max(0, columnIndex)))
+  }
+
   useEffect(() => {
     const unsubscribeRemoteRefresh = window.simpleSSH.workspace.onRemoteRefresh((payload) => {
       const connection = activeConnectionRef.current
@@ -677,6 +751,89 @@ function App() {
     return selected?.path ?? activeConnection?.remoteRoot ?? ''
   }, [remoteSelected, activeConnection?.remoteRoot])
 
+  const getActiveColumnIndex = (selected: (FileNode | null)[], columnsLength: number) => {
+    if (columnsLength <= 0) return 0
+    for (let index = selected.length - 1; index >= 0; index -= 1) {
+      if (selected[index]) return Math.min(index, columnsLength - 1)
+    }
+    return Math.max(0, columnsLength - 1)
+  }
+
+  const localActiveColumnIndex = useMemo(
+    () => getActiveColumnIndex(localSelected, localColumns.length),
+    [localSelected, localColumns.length],
+  )
+
+  const remoteActiveColumnIndex = useMemo(
+    () => getActiveColumnIndex(remoteSelected, remoteColumns.length),
+    [remoteSelected, remoteColumns.length],
+  )
+
+  const localContext = useMemo(() => {
+    if (!activeConnection?.localRoot || localColumns.length === 0) return null
+    const columnIndex = localActiveColumnIndex
+    const parent = columnIndex > 0 ? localSelected[columnIndex - 1] : null
+    const parentPath = parent?.type === 'dir' ? parent.path : activeConnection.localRoot
+    return { path: parentPath, columnIndex }
+  }, [activeConnection?.localRoot, localColumns.length, localActiveColumnIndex, localSelected])
+
+  const remoteContext = useMemo(() => {
+    if (!activeConnection?.remoteRoot || remoteColumns.length === 0) return null
+    const columnIndex = remoteActiveColumnIndex
+    const parent = columnIndex > 0 ? remoteSelected[columnIndex - 1] : null
+    const parentPath = parent?.type === 'dir' ? parent.path : activeConnection.remoteRoot
+    return { path: parentPath, columnIndex }
+  }, [activeConnection?.remoteRoot, remoteColumns.length, remoteActiveColumnIndex, remoteSelected])
+
+  const activeColumnIndex =
+    workspaceView === 'local' ? localActiveColumnIndex : remoteActiveColumnIndex
+  const canCreateItem =
+    Boolean(activeConnection) &&
+    ((workspaceView === 'local' && localContext) || (workspaceView === 'remote' && remoteContext))
+
+  useEffect(() => {
+    setAddMenuColumnIndex(null)
+  }, [activeColumnIndex])
+
+  useEffect(() => {
+    setCreateDraft(null)
+  }, [activeColumnIndex])
+
+  useEffect(() => {
+    if (!deleteConfirm) return
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDeleteConfirm(null)
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [deleteConfirm])
+
+  const createDraftKey = createDraft
+    ? `${createDraft.scope}:${createDraft.parentPath}:${createDraft.columnIndex}:${createDraft.type}`
+    : null
+
+  useEffect(() => {
+    if (createDraftKey) {
+      window.requestAnimationFrame(() => {
+        createDraftInputRef.current?.focus()
+        createDraftInputRef.current?.select()
+      })
+    }
+  }, [createDraftKey])
+
+  const renameDraftKey = renameDraft ? `${renameDraft.scope}:${renameDraft.path}` : null
+
+  useEffect(() => {
+    if (renameDraftKey) {
+      window.requestAnimationFrame(() => {
+        renameDraftInputRef.current?.focus()
+        renameDraftInputRef.current?.select()
+      })
+    }
+  }, [renameDraftKey])
+
   const breadcrumbSegments = useMemo(() => {
     if (workspaceView === 'remote') return splitRemotePath(remotePath)
     return splitLocalPath(localPath)
@@ -725,6 +882,221 @@ function App() {
     const fileName = normalized.split('/').pop() ?? normalized
     return `Last: ${queueStatus.lastPhase} ${fileName}`
   })()
+
+  const createItemAtPath = async (
+    scope: 'local' | 'remote',
+    parentPath: string,
+    type: 'file' | 'dir',
+    name: string,
+    columnIndex?: number,
+  ) => {
+    const connection = activeConnectionRef.current
+    if (!connection) return
+    const trimmedName = name.trim()
+    if (!trimmedName) return
+
+    if (scope === 'local') {
+      const resolvedColumnIndex = (() => {
+        if (typeof columnIndex === 'number') return columnIndex
+        if (parentPath === connection.localRoot) return 0
+        const parentIndex = localSelected.findIndex((node) => node?.path === parentPath)
+        if (parentIndex >= 0) return parentIndex + 1
+        return localActiveColumnIndex
+      })()
+      const result = await window.simpleSSH.workspace.createLocalItem({
+        connectionId: connection.id,
+        parentPath,
+        name: trimmedName,
+        type,
+      })
+      if (result?.ok) {
+        setStatusMessage({ kind: 'ok', message: result.message || 'Item created.' })
+        await refreshLocalFolder(parentPath, resolvedColumnIndex)
+      } else {
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to create item.' })
+      }
+      setAddMenuColumnIndex(null)
+      return
+    }
+
+    const result = await window.simpleSSH.workspace.createRemoteItem({
+      connectionId: connection.id,
+      parentPath,
+      name: trimmedName,
+      type,
+    })
+    if (result?.ok) {
+      setStatusMessage({ kind: 'ok', message: result.message || 'Item created.' })
+      await refreshRemoteFolder(parentPath, { force: true })
+    } else {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to create item.' })
+    }
+    setAddMenuColumnIndex(null)
+  }
+
+  const beginCreateDraft = (scope: 'local' | 'remote', type: 'file' | 'dir', parentPath: string, columnIndex: number) => {
+    setAddMenuColumnIndex(null)
+    setRenameDraft(null)
+    setCreateDraft({ scope, type, parentPath, columnIndex, name: '' })
+  }
+
+  const commitCreateDraft = async (value?: string) => {
+    if (!createDraft) return
+    const { scope, parentPath, type, name, columnIndex } = createDraft
+    setCreateDraft(null)
+    const resolvedName = (value ?? name).trim()
+    if (!resolvedName) return
+    await createItemAtPath(scope, parentPath, type, resolvedName, columnIndex)
+  }
+
+  const findNodeInColumns = (columns: FileNode[][], targetPath: string) => {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      const node = columns[columnIndex]?.find((entry) => entry.path === targetPath)
+      if (node) return { node, columnIndex }
+    }
+    return null
+  }
+
+  const localParentPath = (value: string) => {
+    const normalized = value.replace(/\//g, '\\')
+    const index = normalized.lastIndexOf('\\')
+    if (index <= 0) return normalized
+    return normalized.slice(0, index)
+  }
+
+  const remoteParentPath = (value: string) => {
+    const normalized = value.replace(/\\/g, '/')
+    const index = normalized.lastIndexOf('/')
+    if (index <= 0) return normalized || '/'
+    return normalized.slice(0, index)
+  }
+
+  const beginRenameDraft = (scope: 'local' | 'remote', targetPath: string) => {
+    const columns = scope === 'local' ? localColumns : remoteColumns
+    const found = findNodeInColumns(columns, targetPath)
+    if (!found) return
+    setCreateDraft(null)
+    setAddMenuColumnIndex(null)
+    setRenameDraft({
+      scope,
+      path: found.node.path,
+      columnIndex: found.columnIndex,
+      type: found.node.type,
+      name: found.node.name,
+      originalName: found.node.name,
+    })
+  }
+
+  const commitRenameDraft = async (value?: string) => {
+    if (!renameDraft) return
+    const connection = activeConnectionRef.current
+    if (!connection) return
+    const nextName = (value ?? renameDraft.name).trim()
+    if (!nextName) {
+      setRenameDraft(null)
+      return
+    }
+    if (nextName === renameDraft.originalName) {
+      setRenameDraft(null)
+      return
+    }
+    if (renameDraft.scope === 'local') {
+      const result = await window.simpleSSH.workspace.renameLocalItem({
+        connectionId: connection.id,
+        path: renameDraft.path,
+        name: nextName,
+      })
+      if (result?.ok) {
+        setStatusMessage({ kind: 'ok', message: result.message || 'Item renamed.' })
+        await refreshLocalFolder(localParentPath(renameDraft.path), renameDraft.columnIndex)
+      } else {
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to rename item.' })
+      }
+    } else {
+      const result = await window.simpleSSH.workspace.renameRemoteItem({
+        connectionId: connection.id,
+        path: renameDraft.path,
+        name: nextName,
+      })
+      if (result?.ok) {
+        setStatusMessage({ kind: 'ok', message: result.message || 'Item renamed.' })
+        await refreshRemoteFolder(remoteParentPath(renameDraft.path), { force: true })
+      } else {
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to rename item.' })
+      }
+    }
+    setRenameDraft(null)
+  }
+
+  const handleDeleteItem = async (payload: {
+    scope: 'local' | 'remote'
+    path: string
+    type?: 'file' | 'dir'
+  }) => {
+    const connection = activeConnectionRef.current
+    if (!connection) return
+    if (payload.scope === 'local') {
+      const result = await window.simpleSSH.workspace.deleteLocalItem({
+        connectionId: connection.id,
+        path: payload.path,
+        type: payload.type,
+      })
+      if (result?.ok) {
+        setStatusMessage({ kind: 'ok', message: result.message || 'Item deleted.' })
+        const parent = localParentPath(payload.path)
+        const found = findNodeInColumns(localColumns, payload.path)
+        const columnIndex = found?.columnIndex ?? localActiveColumnIndex
+        await refreshLocalFolder(parent, columnIndex)
+      } else {
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to delete item.' })
+      }
+      return
+    }
+
+    const result = await window.simpleSSH.workspace.deleteRemoteItem({
+      connectionId: connection.id,
+      path: payload.path,
+    })
+    if (result?.ok) {
+      setStatusMessage({ kind: 'ok', message: result.message || 'Item deleted.' })
+      const parent = remoteParentPath(payload.path)
+      await refreshRemoteFolder(parent, { force: true })
+    } else {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to delete item.' })
+    }
+  }
+
+  useEffect(() => {
+    const unsubscribe = window.simpleSSH.workspace.onCreateItemPrompt((payload) => {
+      if (!payload?.parentPath || !payload.type || !payload.scope) return
+      const columnIndex =
+        payload.scope === 'local' ? localActiveColumnIndex : remoteActiveColumnIndex
+      beginCreateDraft(payload.scope, payload.type, payload.parentPath, columnIndex)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [localActiveColumnIndex, remoteActiveColumnIndex])
+
+  useEffect(() => {
+    const unsubscribe = window.simpleSSH.workspace.onRenameItemPrompt((payload) => {
+      if (!payload?.path || !payload.scope) return
+      beginRenameDraft(payload.scope, payload.path)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [localColumns, remoteColumns])
+
+  useEffect(() => {
+    const unsubscribe = window.simpleSSH.workspace.onDeleteItemPrompt((payload) => {
+      if (!payload?.path || !payload.scope) return
+      setDeleteConfirm(payload)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [localColumns, localActiveColumnIndex])
 
   return (
     <div className='app-shell'>
@@ -792,12 +1164,48 @@ function App() {
                 {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
                     <div className={`column ${columnIndex > 0 ? 'linked' : ''}`} key={`col-${columnIndex}`}>
                       <div className='column-list scroll-hide' onScroll={handleScrollVisibility}>
+                        {createDraft &&
+                          createDraft.columnIndex === columnIndex &&
+                          createDraft.scope === workspaceView &&
+                          createDraft.parentPath && (
+                            <div className='column-item draft'>
+                              <span className={`file-badge ${createDraft.type === 'dir' ? 'type-dir' : ''}`}>
+                                {createDraft.type === 'dir' ? 'dir' : 'file'}
+                              </span>
+                              <input
+                                ref={createDraftInputRef}
+                                className='column-input'
+                                value={createDraft.name}
+                                placeholder={createDraft.type === 'dir' ? 'New folder' : 'New file'}
+                                onChange={(event) =>
+                                  setCreateDraft((prev) =>
+                                    prev ? { ...prev, name: event.target.value } : prev,
+                                  )
+                                }
+                                onBlur={(event) => void commitCreateDraft(event.currentTarget.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    void commitCreateDraft(event.currentTarget.value)
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setCreateDraft(null)
+                                  }
+                                }}
+                              />
+                            </div>
+                          )}
                         {column.map((node) => {
                           const isActive =
                             workspaceView === 'local'
                               ? localSelected[columnIndex]?.path === node.path
                               : remoteSelected[columnIndex]?.path === node.path
                           const badge = fileBadge(node)
+                          const isRenaming =
+                            renameDraft?.scope === workspaceView &&
+                            renameDraft?.path === node.path &&
+                            renameDraft.columnIndex === columnIndex
                           return (
                             <div
                               key={node.path}
@@ -824,13 +1232,84 @@ function App() {
                             }}
                           >
                             <span className={badge.className}>{badge.label}</span>
-                            <div className='column-name'>{node.name}</div>
+                            {isRenaming ? (
+                              <input
+                                ref={renameDraftInputRef}
+                                className='column-input'
+                                value={renameDraft.name}
+                                onChange={(event) =>
+                                  setRenameDraft((prev) =>
+                                    prev ? { ...prev, name: event.target.value } : prev,
+                                  )
+                                }
+                                onBlur={(event) => void commitRenameDraft(event.currentTarget.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    void commitRenameDraft(event.currentTarget.value)
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setRenameDraft(null)
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div className='column-name'>{node.name}</div>
+                            )}
                             {node.type === 'file' && <div className='column-size'>{formatBytes(node.size)}</div>}
                           </div>
                         )
                       })}
                       {column.length === 0 && <div className='empty'>Empty</div>}
                     </div>
+                    {columnIndex === activeColumnIndex && canCreateItem && (
+                      <div className='column-actions' ref={addMenuRef}>
+                        <button
+                          className='ghost small column-action'
+                          onClick={() =>
+                            setAddMenuColumnIndex((prev) => (prev === columnIndex ? null : columnIndex))
+                          }
+                          aria-label='Add file or folder'
+                        >
+                          +
+                        </button>
+                        {addMenuColumnIndex === columnIndex && (
+                          <div className='add-menu column-menu'>
+                            <button
+                              className='ghost small'
+                              onClick={() => {
+                                if (!activeConnection) return
+                                if (workspaceView === 'local') {
+                                  if (!localContext) return
+                                  beginCreateDraft('local', 'file', localContext.path, localContext.columnIndex)
+                                } else {
+                                  if (!remoteContext) return
+                                  beginCreateDraft('remote', 'file', remoteContext.path, remoteContext.columnIndex)
+                                }
+                              }}
+                            >
+                              New File
+                            </button>
+                            <button
+                              className='ghost small'
+                              onClick={() => {
+                                if (!activeConnection) return
+                                if (workspaceView === 'local') {
+                                  if (!localContext) return
+                                  beginCreateDraft('local', 'dir', localContext.path, localContext.columnIndex)
+                                } else {
+                                  if (!remoteContext) return
+                                  beginCreateDraft('remote', 'dir', remoteContext.path, remoteContext.columnIndex)
+                                }
+                              }}
+                            >
+                              New Folder
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {(workspaceView === 'local' ? localColumns : remoteColumns).length === 0 && (
@@ -848,6 +1327,32 @@ function App() {
 
       {queuePanelOpen && (
         <div className='status-overlay' onClick={() => setQueuePanelOpen(false)} />
+      )}
+      {deleteConfirm && (
+        <div className='status-overlay' onClick={() => setDeleteConfirm(null)} />
+      )}
+      {deleteConfirm && (
+        <div className='confirm-modal'>
+          <div className='confirm-title'>
+            Delete {deleteConfirm.type === 'dir' ? 'folder' : 'file'}?
+          </div>
+          <div className='confirm-sub'>{deleteConfirm.path}</div>
+          <div className='confirm-actions'>
+            <button className='ghost small' onClick={() => setDeleteConfirm(null)}>
+              Cancel
+            </button>
+            <button
+              className='danger'
+              onClick={() => {
+                const payload = deleteConfirm
+                setDeleteConfirm(null)
+                void handleDeleteItem(payload)
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
       )}
       <div
         className='status-strip status-bottom'
