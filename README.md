@@ -18,6 +18,7 @@ previews the local workspace tree. Upload queue and verification are built in.
 - Live sync mode (polls remote + last-write-wins resolution).
 - Force push to upload local workspace in bulk.
 - Bottom status bar with connection, roots, sync mode, and queue state.
+- Status-strip popup with transfer history, filtering, and clear.
 - Right-click actions (open in VS Code, reveal in OS, copy paths).
 - Import/export of connection metadata.
 
@@ -39,5 +40,4 @@ npm run build:mac
 - src: renderer UI
 
 ## Known Gaps
-- Transfer queue has no dedicated history panel (status bar summary only).
 - Live sync is mtime-based (no full content diff/merge).

@@ -58,17 +58,22 @@ verification (size + hash).
 - p-queue
 
 ## Known Gaps / TODO
-- Transfer queue has no dedicated history panel (status bar summary only).
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
 
 ## Upcoming Plan - Remote Cache Indexing
-- Use incremental diff-merge during initial full index so existing cache entries are preserved.
-- Ensure refresh only updates the current folder cache (add/remove/update) without touching other cached paths.
+- Use incremental diff-merge during initial full index so existing cache entries are preserved. (Done)
+- Ensure refresh only updates the current folder cache (add/remove/update) without touching other cached paths. (Done)
 - Keep cache pinned by visit frequency and respect per-connection settings for pin thresholds and max pinned entries.
-- Add a manual "Refresh this folder" action in the remote context menu (optional UX polish).
+- Add a manual "Refresh this folder" action in the remote context menu (optional UX polish). (Done)
 - Add a per-connection "Rebuild remote index" button in the connection editor. (Done)
 
 ## Notes for /new
 - Implement the "Rebuild remote index" button in the connection editor and wire it to a full reindex. (Done)
-- Add "Refresh this folder" to the remote context menu, using the force reload path.
-- Convert initial index to diff-merge updates so existing cache entries are preserved.
+- Add "Refresh this folder" to the remote context menu, using the force reload path. (Done)
+- Convert initial index to diff-merge updates so existing cache entries are preserved. (Done)
+
+## Next Milestone - Transfer Queue History Panel (Done)
+- Add a dedicated history panel for transfer queue items. (Done)
+- Include filtering for status (failed/complete/active). (Done)
+- Support clearing the history list per connection. (Done)
+- Show timestamps and error details for failed entries. (Done)

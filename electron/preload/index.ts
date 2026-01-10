@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.invoke('workspace:downloadRemoteFile', payload),
     startWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:startWatch', payload),
     stopWatch: (payload: { connectionId: string }) => ipcRenderer.invoke('workspace:stopWatch', payload),
+    clearQueueHistory: (payload: { connectionId: string }) =>
+      ipcRenderer.invoke('workspace:clearQueueHistory', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
     onStatus: (handler: (status: unknown) => void) => {

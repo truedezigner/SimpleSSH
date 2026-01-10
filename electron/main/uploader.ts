@@ -57,6 +57,7 @@ const SUPPRESS_TTL_MS = 2000
 const LOCAL_CHANGE_TTL_MS = 20000
 const DEFAULT_POLL_INTERVAL_MS = 5000
 const MTIME_SKEW_MS = 1500
+const QUEUE_HISTORY_MAX = 200
 
 export function setQueueStatusEmitter(emitter: StatusEmitter) {
   emitStatus = emitter
@@ -492,7 +493,7 @@ function updateRecent(entry: WatchEntry, item: QueueItem) {
   }
   entry.status = {
     ...entry.status,
-    recent: recent.slice(0, 8),
+    recent: recent.slice(0, QUEUE_HISTORY_MAX),
   }
   emitStatus(entry.status)
 }
@@ -699,6 +700,17 @@ async function ensureEntry(
 
 export function getQueueStatus(connectionId: string) {
   return watchers.get(connectionId)?.status ?? null
+}
+
+export function clearQueueHistory(connectionId: string) {
+  const entry = watchers.get(connectionId)
+  if (!entry) return null
+  entry.status = {
+    ...entry.status,
+    recent: [],
+  }
+  emitStatus(entry.status)
+  return entry.status
 }
 
 export async function startWatcher(

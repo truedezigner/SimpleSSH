@@ -33,6 +33,7 @@ interface Window {
       startWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       stopWatch: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
       forceUploadFile: (payload: { connectionId: string; path: string }) => Promise<{ ok: boolean; message: string; status?: unknown }>
+      clearQueueHistory: (payload: { connectionId: string }) => Promise<unknown | null>
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void

@@ -176,6 +176,8 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [workspaceView, setWorkspaceView] = useState<'local' | 'remote'>('remote')
+  const [queuePanelOpen, setQueuePanelOpen] = useState(false)
+  const [queueFilter, setQueueFilter] = useState<'all' | 'active' | 'failed' | 'complete'>('all')
 
   const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft>(defaultConnection())
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({})
@@ -488,6 +490,26 @@ function App() {
     }
   }
 
+  const handleClearQueueHistory = async () => {
+    if (!activeConnection) return
+    const result = await window.simpleSSH.workspace.clearQueueHistory({ connectionId: activeConnection.id })
+    if (result && isQueueStatus(result)) {
+      setQueueStatusMap((prev) => ({ ...prev, [activeConnection.id]: result }))
+    } else {
+      setQueueStatusMap((prev) => {
+        const existing = prev[activeConnection.id]
+        if (!existing) return prev
+        return {
+          ...prev,
+          [activeConnection.id]: {
+            ...existing,
+            recent: [],
+          },
+        }
+      })
+    }
+  }
+
   const refreshRemoteFolder = async (targetPath: string, options?: { force?: boolean }) => {
     const connection = activeConnectionRef.current
     if (!connection) return
@@ -641,6 +663,19 @@ function App() {
   }, [workspaceView, localPath, remotePath])
 
   const queueItems = queueStatus?.recent ?? []
+  const queueActiveCount = queueItems.filter((item) =>
+    item.phase === 'queued' || item.phase === 'uploading' || item.phase === 'verifying' || item.phase === 'deleting',
+  ).length
+  const queueFailedCount = queueItems.filter((item) => item.phase === 'failed').length
+  const queueCompleteCount = queueItems.filter((item) => item.phase === 'complete').length
+  const queueFilteredItems = queueItems.filter((item) => {
+    if (queueFilter === 'failed') return item.phase === 'failed'
+    if (queueFilter === 'complete') return item.phase === 'complete'
+    if (queueFilter === 'active') {
+      return item.phase === 'queued' || item.phase === 'uploading' || item.phase === 'verifying' || item.phase === 'deleting'
+    }
+    return true
+  })
   const connectionStatusLabel = !activeConnection
     ? 'Connection: disconnected'
     : `Connection: ${activeConnection.name || activeConnection.host}`
@@ -791,7 +826,21 @@ function App() {
         </div>
       </div>
 
-      <div className='status-strip status-bottom'>
+      {queuePanelOpen && (
+        <div className='status-overlay' onClick={() => setQueuePanelOpen(false)} />
+      )}
+      <div
+        className='status-strip status-bottom'
+        onClick={() => setQueuePanelOpen((prev) => !prev)}
+        role='button'
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setQueuePanelOpen((prev) => !prev)
+          }
+        }}
+      >
         <div className='status-chip'>{connectionStatusLabel}</div>
         <div className='status-chip'>{syncStateLabel}</div>
         <div className='status-chip'>
@@ -801,6 +850,77 @@ function App() {
         {statusMessage && (
           <div className={`status-chip ${statusMessage.kind}`}>{statusMessage.message}</div>
         )}
+      </div>
+      <div className={`status-popup ${queuePanelOpen ? 'open' : ''}`} onClick={(event) => event.stopPropagation()}>
+        <div className='status-popup-header'>
+          <div>
+            <div className='panel-title'>Transfer History</div>
+            <div className='status-popup-sub'>
+              {activeConnection ? `Connection: ${activeConnection.name || activeConnection.host}` : 'No connection selected'}
+            </div>
+          </div>
+          <div className='queue-history-actions'>
+            <button className='ghost small' onClick={() => void handleClearQueueHistory()} disabled={!activeConnection}>
+              Clear
+            </button>
+            <button className='ghost small' onClick={() => setQueuePanelOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div className='queue-filters'>
+          <button
+            className={`queue-filter ${queueFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setQueueFilter('all')}
+          >
+            All ({queueItems.length})
+          </button>
+          <button
+            className={`queue-filter ${queueFilter === 'active' ? 'active' : ''}`}
+            onClick={() => setQueueFilter('active')}
+          >
+            Active ({queueActiveCount})
+          </button>
+          <button
+            className={`queue-filter ${queueFilter === 'failed' ? 'active' : ''}`}
+            onClick={() => setQueueFilter('failed')}
+          >
+            Failed ({queueFailedCount})
+          </button>
+          <button
+            className={`queue-filter ${queueFilter === 'complete' ? 'active' : ''}`}
+            onClick={() => setQueueFilter('complete')}
+          >
+            Complete ({queueCompleteCount})
+          </button>
+        </div>
+        <div className='queue-history-list scroll-hide' onScroll={handleScrollVisibility}>
+          {queueFilteredItems.length === 0 && (
+            <div className='queue-history-empty'>No history items for this filter.</div>
+          )}
+          {queueFilteredItems.map((item) => {
+            const actionLabel = item.action === 'delete' ? 'delete' : 'upload'
+            return (
+              <div className='queue-item' key={item.id}>
+                <div className='queue-main'>
+                  <span className='queue-action'>{actionLabel}</span>
+                  <span className='queue-path'>{item.path}</span>
+                </div>
+                <div className='queue-meta'>
+                  <span>{item.phase}</span>
+                  <span>{formatRelativeTime(item.updatedAt)}</span>
+                  {item.bytesTotal ? (
+                    <span>{`${formatBytes(item.bytesSent ?? 0)} / ${formatBytes(item.bytesTotal)}`}</span>
+                  ) : null}
+                </div>
+                {item.note && <div className='queue-note'>{item.note}</div>}
+                {item.phase === 'failed' && item.error && (
+                  <div className='queue-error'>{item.error}</div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
         <div

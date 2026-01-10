@@ -20,7 +20,7 @@ import {
   refreshRemoteTree,
   syncRemoteToLocal,
 } from './workspace'
-import { forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
+import { clearQueueHistory, forceUploadFile, getQueueStatus, setQueueStatusEmitter, startWatcher, stopWatcher } from './uploader'
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
@@ -401,6 +401,10 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('workspace:getQueueStatus', async (_event, payload: { connectionId: string }) => {
     return getQueueStatus(payload.connectionId)
+  })
+
+  ipcMain.handle('workspace:clearQueueHistory', async (_event, payload: { connectionId: string }) => {
+    return clearQueueHistory(payload.connectionId)
   })
 
   ipcMain.handle(
