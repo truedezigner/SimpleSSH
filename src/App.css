@@ -464,6 +464,17 @@ label {
   color: rgba(232, 229, 255, 0.7);
 }
 
+label.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+label.checkbox-row input {
+  margin: 0;
+}
+
 .error {
   font-size: 10px;
   color: #ff9aad;

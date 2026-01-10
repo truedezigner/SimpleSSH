@@ -1527,6 +1527,36 @@ function App() {
           <div className='panel connection-editor'>
             <div className='panel-title'>Connection Editor</div>
             <div className='grid'>
+              <label className='checkbox-row'>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.remoteIndexOnConnect}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, remoteIndexOnConnect: event.target.checked }))
+                  }
+                />
+                <span>Initial remote index on connect</span>
+              </label>
+              <label className='checkbox-row'>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.remoteFirstEditing}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, remoteFirstEditing: event.target.checked }))
+                  }
+                />
+                <span>Remote-first editing (beta)</span>
+              </label>
+              <label className='checkbox-row'>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.foldersFirst}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, foldersFirst: event.target.checked }))
+                  }
+                />
+                <span>Folders above files</span>
+              </label>
               <label>
                 Name
                 <input
@@ -1611,36 +1641,6 @@ function App() {
                     Pick
                   </button>
                 </div>
-              </label>
-              <label>
-                <input
-                  type='checkbox'
-                  checked={connectionDraft.remoteIndexOnConnect}
-                  onChange={(event) =>
-                    setConnectionDraft((prev) => ({ ...prev, remoteIndexOnConnect: event.target.checked }))
-                  }
-                />
-                Initial remote index on connect
-              </label>
-              <label>
-                <input
-                  type='checkbox'
-                  checked={connectionDraft.remoteFirstEditing}
-                  onChange={(event) =>
-                    setConnectionDraft((prev) => ({ ...prev, remoteFirstEditing: event.target.checked }))
-                  }
-                />
-                Remote-first editing (beta)
-              </label>
-              <label>
-                <input
-                  type='checkbox'
-                  checked={connectionDraft.foldersFirst}
-                  onChange={(event) =>
-                    setConnectionDraft((prev) => ({ ...prev, foldersFirst: event.target.checked }))
-                  }
-                />
-                Folders above files
               </label>
               <label>
                 Pin cache after N visits
