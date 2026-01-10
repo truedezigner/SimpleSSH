@@ -582,7 +582,11 @@ function App() {
     <div className='app-shell'>
       <div className='topbar'>
         <div className='brand'>
-          <div className='brand-mark'>S</div>
+          <div className='brand-mark'>
+            {activeConnection?.name
+              ? activeConnection.name.trim().slice(0, 2).toUpperCase()
+              : 'S'}
+          </div>
           <div>
             <div className='brand-title-row'>
               <div className='brand-name'>
@@ -592,11 +596,7 @@ function App() {
                 <div className='provider-tag'>{activeConnection.hostingProvider}</div>
               )}
             </div>
-            <div className='brand-tag'>
-              {activeConnection?.hostingProvider && activeConnection.hostingProvider !== 'none'
-                ? activeConnection.hostingProvider
-                : 'Remote-first sync workspace'}
-            </div>
+            <div className='brand-tag'>Workspace</div>
           </div>
         </div>
         <div className='topbar-center'>
