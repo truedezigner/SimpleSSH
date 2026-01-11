@@ -161,6 +161,42 @@ const splitLocalPath = (value: string) => {
   return normalized.split('\\').filter(Boolean)
 }
 
+const normalizeLocalPath = (value: string) => value.replace(/\//g, '\\')
+const normalizeRemotePath = (value: string) => value.replace(/\\/g, '/')
+
+const ensureLocalRoot = (value: string) => (value.endsWith(':') ? `${value}\\` : value)
+
+const trimLocalTrailing = (value: string) => value.replace(/[\\/]+$/, '')
+const trimRemoteTrailing = (value: string) => value.replace(/\/+$/, '') || '/'
+
+const getLocalRelativePath = (root: string, target: string) => {
+  if (!root) return null
+  const normalizedRoot = trimLocalTrailing(ensureLocalRoot(normalizeLocalPath(root)))
+  const normalizedTarget = trimLocalTrailing(normalizeLocalPath(target))
+  const rootLower = normalizedRoot.toLowerCase()
+  const targetLower = normalizedTarget.toLowerCase()
+  if (targetLower === rootLower) return ''
+  if (targetLower.startsWith(`${rootLower}\\`)) {
+    return normalizedTarget.slice(normalizedRoot.length).replace(/^[\\/]+/, '')
+  }
+  return null
+}
+
+const getRemoteRelativePath = (root: string, target: string) => {
+  if (!root) return null
+  const normalizedRoot = trimRemoteTrailing(normalizeRemotePath(root))
+  const normalizedTarget = trimRemoteTrailing(normalizeRemotePath(target))
+  if (normalizedRoot === '/') {
+    if (normalizedTarget === '/') return ''
+    return normalizedTarget.replace(/^\/+/, '')
+  }
+  if (normalizedTarget === normalizedRoot) return ''
+  if (normalizedTarget.startsWith(`${normalizedRoot}/`)) {
+    return normalizedTarget.slice(normalizedRoot.length).replace(/^\/+/, '')
+  }
+  return null
+}
+
 const formatRelativeTime = (timestamp?: number) => {
   if (!timestamp) return ''
   const delta = Math.max(0, Date.now() - timestamp)
@@ -208,6 +244,50 @@ const buildRemoteBreadcrumbPaths = (value: string) => {
     paths.push(current)
   }
   return paths
+}
+
+const buildLocalBreadcrumbs = (root: string, value: string) => {
+  if (!value) return { segments: [], paths: [] }
+  if (!root) {
+    return { segments: splitLocalPath(value), paths: buildLocalBreadcrumbPaths(value) }
+  }
+  const relative = getLocalRelativePath(root, value)
+  if (relative === null) {
+    return { segments: splitLocalPath(value), paths: buildLocalBreadcrumbPaths(value) }
+  }
+  const rootPath = ensureLocalRoot(normalizeLocalPath(root))
+  const relativeParts = splitLocalPath(relative)
+  const rootLabel = fileNameFromPath(rootPath) || rootPath
+  const segments = [rootLabel, ...relativeParts]
+  const paths = [rootPath]
+  let current = rootPath
+  for (const next of relativeParts) {
+    current = `${current.replace(/[\\/]+$/, '')}\\${next}`
+    paths.push(current)
+  }
+  return { segments, paths }
+}
+
+const buildRemoteBreadcrumbs = (root: string, value: string) => {
+  if (!value) return { segments: [], paths: [] }
+  if (!root) {
+    return { segments: splitRemotePath(value), paths: buildRemoteBreadcrumbPaths(value) }
+  }
+  const relative = getRemoteRelativePath(root, value)
+  if (relative === null) {
+    return { segments: splitRemotePath(value), paths: buildRemoteBreadcrumbPaths(value) }
+  }
+  const rootPath = trimRemoteTrailing(normalizeRemotePath(root))
+  const relativeParts = relative ? relative.split('/').filter(Boolean) : []
+  const rootLabel = rootPath === '/' ? '/' : fileNameFromPath(rootPath)
+  const segments = [rootLabel || rootPath, ...relativeParts]
+  const paths = [rootPath]
+  let current = rootPath
+  for (const next of relativeParts) {
+    current = current === '/' ? `/${next}` : `${current}/${next}`
+    paths.push(current)
+  }
+  return { segments, paths }
 }
 
 const editorLanguageForName = (name: string) => {
@@ -1178,14 +1258,16 @@ function App() {
 
   const navigateToLocalPath = async (targetPath: string) => {
     if (!activeConnection) return
-    const parts = splitLocalPath(targetPath)
-    if (parts.length === 0) return
-    let root = parts[0]
-    if (root.endsWith(':')) root = `${root}\\`
+    const root = localBasePath || activeConnection.localRoot
+    if (!root) return
+    const relative = getLocalRelativePath(root, targetPath)
+    if (relative === null) return
+    const parts = splitLocalPath(relative)
+    const rootPath = ensureLocalRoot(normalizeLocalPath(root))
 
     const columns: FileNode[][] = []
     const selected: (FileNode | null)[] = []
-    let currentPath = root
+    let currentPath = rootPath
     let nodes = await window.simpleSSH.workspace.list({ root: currentPath, depth: 1 })
     let sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
     columns.push(sorted)
@@ -1206,18 +1288,21 @@ function App() {
 
     setLocalColumns(columns)
     setLocalSelected(selected)
-    setLocalBasePath(root)
+    setLocalBasePath(rootPath)
   }
 
   const navigateToRemotePath = async (targetPath: string) => {
     if (!activeConnection) return
-    const parts = splitRemotePath(targetPath)
-    if (parts.length === 0) return
-    const root = parts[0] === '/' ? '/' : parts[0]
+    const root = remoteBasePath || activeConnection.remoteRoot
+    if (!root) return
+    const relative = getRemoteRelativePath(root, targetPath)
+    if (relative === null) return
+    const parts = relative ? relative.split('/').filter(Boolean) : []
+    const rootPath = trimRemoteTrailing(normalizeRemotePath(root))
 
     const columns: FileNode[][] = []
     const selected: (FileNode | null)[] = []
-    let currentPath = root
+    let currentPath = rootPath
     let response = await window.simpleSSH.workspace.remoteList({
       connectionId: activeConnection.id,
       path: currentPath,
@@ -1244,7 +1329,7 @@ function App() {
 
     setRemoteColumns(columns)
     setRemoteSelected(selected)
-    setRemoteBasePath(root)
+    setRemoteBasePath(rootPath)
   }
 
   const localActiveColumnIndex = useMemo(
@@ -1322,15 +1407,20 @@ function App() {
     }
   }, [renameDraftKey])
 
-  const breadcrumbSegments = useMemo(() => {
-    if (workspaceView === 'remote') return splitRemotePath(remotePath)
-    return splitLocalPath(localPath)
-  }, [workspaceView, localPath, remotePath])
+  const localBreadcrumb = useMemo(() => {
+    const root = localBasePath || activeConnection?.localRoot || ''
+    return buildLocalBreadcrumbs(root, localPath)
+  }, [localBasePath, activeConnection?.localRoot, localPath])
 
-  const breadcrumbPaths = useMemo(() => {
-    if (workspaceView === 'remote') return buildRemoteBreadcrumbPaths(remotePath)
-    return buildLocalBreadcrumbPaths(localPath)
-  }, [workspaceView, localPath, remotePath])
+  const remoteBreadcrumb = useMemo(() => {
+    const root = remoteBasePath || activeConnection?.remoteRoot || ''
+    return buildRemoteBreadcrumbs(root, remotePath)
+  }, [remoteBasePath, activeConnection?.remoteRoot, remotePath])
+
+  const breadcrumbSegments =
+    workspaceView === 'remote' ? remoteBreadcrumb.segments : localBreadcrumb.segments
+  const breadcrumbPaths =
+    workspaceView === 'remote' ? remoteBreadcrumb.paths : localBreadcrumb.paths
 
   const queueItems = queueStatus?.recent ?? []
   const queueActiveCount = queueItems.filter((item) =>
