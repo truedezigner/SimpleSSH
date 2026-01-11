@@ -61,6 +61,7 @@ verification (size + hash).
 ## Known Gaps / TODO
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
 - Column view filters/sorting (name/size/modified).
+- Breadcrumb jump: clicking a parent segment can leave the column view empty even though the folder has contents.
 
 ## Upcoming Plan - Remote Cache Indexing
 - Use incremental diff-merge during initial full index so existing cache entries are preserved. (Done)
@@ -87,6 +88,11 @@ verification (size + hash).
 - Build a built-in editor panel with a configurable editor preference (built-in vs external).
 - Provide context menu actions to open in the other editor.
 - Expose per-connection editor defaults (font size, tab size, soft tabs, word wrap).
+
+## Plan - Default Local Mirror of Remote Paths (Planned)
+- When setting a local root, create a default mapping that mirrors the remote folder hierarchy under that root.
+- Example: remote `public_html/haasedesigns.com` lands at local `<localRoot>/public_html/haasedesigns.com`.
+- Ensure remote downloads preserve parent folders without overwriting existing local files.
 
 ## Release Notes / Reminders
 - Merge branch `test-feature-history` into `main` when ready and push to origin.

@@ -8,7 +8,8 @@ Add a built-in code editor panel while preserving the ability to open files in a
 - Preserve the existing per-connection `codeCommand` for external editor launches.
 - Support per-connection defaults (built-in vs external).
 - Support editor-specific preferences (font size, tab size, soft tabs, word wrap).
-- Let users set the built-in editor layout (full vs 50/50 split) per connection.
+- Let users set the built-in editor layout (full vs 30/70 split) per connection.
+- Allow a configurable shortcut for toggling the editor layout.
 
 ## UX Notes
 - The connection editor should contain a dedicated "Code Editor" section.
@@ -19,6 +20,7 @@ Add a built-in code editor panel while preserving the ability to open files in a
 - Add per-connection fields for:
   - `editorPreference`: `built-in` or `external`
   - `editorLayout`: `full` or `split`
+  - `editorLayoutShortcut`: string (e.g. `Ctrl+Shift+L`)
   - `editorFontSize`: number
   - `editorTabSize`: number
   - `editorSoftTabs`: boolean

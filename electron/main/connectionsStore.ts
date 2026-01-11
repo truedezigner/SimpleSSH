@@ -7,6 +7,7 @@ export type VerifyMode = 'sha256-remote' | 'download-back'
 export type AuthType = 'password' | 'key'
 export type SyncMode = 'manual' | 'upload' | 'live'
 export type EditorPreference = 'built-in' | 'external'
+export type EditorLayout = 'full' | 'split'
 
 export interface Connection {
   id: string
@@ -24,6 +25,8 @@ export interface Connection {
   hostingProvider: string
   codeCommand: string
   editorPreference: EditorPreference
+  editorLayout: EditorLayout
+  editorLayoutShortcut: string
   editorFontSize: number
   editorTabSize: number
   editorSoftTabs: boolean
@@ -57,6 +60,8 @@ async function readConnections(): Promise<Connection[]> {
         liveSyncIntervalSec: 5,
         hostingProvider: 'none',
         editorPreference: 'external' as EditorPreference,
+        editorLayout: 'full' as EditorLayout,
+        editorLayoutShortcut: 'Ctrl+Shift+L',
         editorFontSize: 14,
         editorTabSize: 2,
         editorSoftTabs: true,
@@ -101,6 +106,8 @@ export async function upsertConnection(input: ConnectionInput) {
     liveSyncIntervalSec: 5,
     hostingProvider: 'none',
     editorPreference: 'external' as EditorPreference,
+    editorLayout: 'full' as EditorLayout,
+    editorLayoutShortcut: 'Ctrl+Shift+L',
     editorFontSize: 14,
     editorTabSize: 2,
     editorSoftTabs: true,

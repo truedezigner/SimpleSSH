@@ -7,6 +7,7 @@ Stored in the app data directory:
 
 UI note: the connections drawer and editor map 1:1 to this metadata.
 Sorting note: `foldersFirst` controls whether folder entries appear before files in the column view.
+Editor layout note: `editorLayout` controls full vs split view and `editorLayoutShortcut` customizes the toggle hotkey.
 
 Example:
 ```
@@ -25,6 +26,13 @@ Example:
     "syncMode": "manual",
     "remoteFirstEditing": false,
     "foldersFirst": true,
+    "editorPreference": "built-in",
+    "editorLayout": "full",
+    "editorLayoutShortcut": "Ctrl+Shift+L",
+    "editorFontSize": 14,
+    "editorTabSize": 2,
+    "editorSoftTabs": true,
+    "editorWordWrap": false,
     "codeCommand": "code"
   }
 ]

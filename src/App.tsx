@@ -29,6 +29,7 @@ interface Connection {
   codeCommand: string
   editorPreference: EditorPreference
   editorLayout: EditorLayout
+  editorLayoutShortcut: string
   editorFontSize: number
   editorTabSize: number
   editorSoftTabs: boolean
@@ -117,6 +118,7 @@ const defaultConnection = (): ConnectionDraft => ({
   codeCommand: 'code',
   editorPreference: 'external',
   editorLayout: 'full',
+  editorLayoutShortcut: 'Ctrl+Shift+L',
   editorFontSize: 14,
   editorTabSize: 2,
   editorSoftTabs: true,
@@ -177,6 +179,35 @@ const fileNameFromPath = (value: string) => {
   const normalized = value.replace(/\\/g, '/')
   const parts = normalized.split('/').filter(Boolean)
   return parts[parts.length - 1] ?? value
+}
+
+const buildLocalBreadcrumbPaths = (value: string) => {
+  const parts = splitLocalPath(value)
+  if (parts.length === 0) return []
+  let current = parts[0]
+  if (current.endsWith(':')) {
+    current = `${current}\\`
+  }
+  const paths = [current]
+  for (let index = 1; index < parts.length; index += 1) {
+    const next = parts[index]
+    current = `${current.replace(/[\\/]+$/, '')}\\${next}`
+    paths.push(current)
+  }
+  return paths
+}
+
+const buildRemoteBreadcrumbPaths = (value: string) => {
+  const parts = splitRemotePath(value)
+  if (parts.length === 0) return []
+  let current = parts[0] === '/' ? '/' : parts[0]
+  const paths = [current]
+  for (let index = 1; index < parts.length; index += 1) {
+    const next = parts[index]
+    current = current === '/' ? `/${next}` : `${current}/${next}`
+    paths.push(current)
+  }
+  return paths
 }
 
 const editorLanguageForName = (name: string) => {
@@ -247,6 +278,83 @@ const isQueueStatus = (value: unknown): value is QueueStatus => {
   return 'connectionId' in value && 'watching' in value
 }
 
+const defaultEditorLayoutShortcut = 'Ctrl+Shift+L'
+
+const parseShortcut = (value: string) => {
+  const tokens = value
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (tokens.length === 0) return null
+
+  const spec = {
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+    code: '',
+    key: '',
+  }
+
+  const keyTokenToCode = (token: string) => {
+    if (token.length === 1) {
+      const upper = token.toUpperCase()
+      if (upper >= 'A' && upper <= 'Z') return `Key${upper}`
+      if (upper >= '0' && upper <= '9') return `Digit${upper}`
+      return ''
+    }
+    const normalized = token.toLowerCase()
+    const keyMap: Record<string, string> = {
+      space: 'Space',
+      spacebar: 'Space',
+      enter: 'Enter',
+      return: 'Enter',
+      escape: 'Escape',
+      esc: 'Escape',
+      tab: 'Tab',
+      backspace: 'Backspace',
+    }
+    if (keyMap[normalized]) return keyMap[normalized]
+    if (normalized.startsWith('key') && normalized.length === 4) {
+      return `Key${normalized.slice(3).toUpperCase()}`
+    }
+    return ''
+  }
+
+  for (const token of tokens) {
+    const normalized = token.toLowerCase()
+    if (normalized === 'ctrl' || normalized === 'control') {
+      spec.ctrl = true
+      continue
+    }
+    if (normalized === 'cmd' || normalized === 'command' || normalized === 'meta' || normalized === 'super') {
+      spec.meta = true
+      continue
+    }
+    if (normalized === 'alt' || normalized === 'option') {
+      spec.alt = true
+      continue
+    }
+    if (normalized === 'shift') {
+      spec.shift = true
+      continue
+    }
+    if (spec.code || spec.key) return null
+    spec.code = keyTokenToCode(token)
+    spec.key = normalized
+  }
+
+  if (!spec.code && !spec.key) return null
+  return spec
+}
+
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!target || !(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select'
+}
+
 function App() {
   const [connections, setConnections] = useState<Connection[]>([])
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
@@ -284,6 +392,8 @@ function App() {
   const [localSelected, setLocalSelected] = useState<(FileNode | null)[]>([])
   const [remoteColumns, setRemoteColumns] = useState<FileNode[][]>([])
   const [remoteSelected, setRemoteSelected] = useState<(FileNode | null)[]>([])
+  const [localBasePath, setLocalBasePath] = useState('')
+  const [remoteBasePath, setRemoteBasePath] = useState('')
 
   const activeConnection = useMemo(
     () => connections.find((conn) => conn.id === activeConnectionId) ?? null,
@@ -328,7 +438,13 @@ function App() {
   )
 
   const editorLayout = activeConnection?.editorLayout ?? 'full'
+  const editorLayoutShortcut =
+    activeConnection?.editorLayoutShortcut?.trim() || defaultEditorLayoutShortcut
   const editorLayoutLabel = editorLayout === 'full' ? 'Split 30/70' : 'Full width'
+  const editorLayoutShortcutSpec = useMemo(
+    () => parseShortcut(editorLayoutShortcut) ?? parseShortcut(defaultEditorLayoutShortcut),
+    [editorLayoutShortcut],
+  )
 
   const activeConnectionIdRef = useRef<string | null>(null)
   const activeConnectionRef = useRef<Connection | null>(null)
@@ -426,16 +542,18 @@ function App() {
   useEffect(() => {
     if (!activeConnection) return
     if (activeConnection.localRoot) {
-      void loadLocalRoot(activeConnection)
+      void loadLocalRoot(activeConnection, activeConnection.localRoot)
     } else {
       setLocalColumns([])
       setLocalSelected([])
+      setLocalBasePath('')
     }
     if (activeConnection.remoteRoot) {
-      void loadRemoteRoot(activeConnection)
+      void loadRemoteRoot(activeConnection, { rootOverride: activeConnection.remoteRoot })
     } else {
       setRemoteColumns([])
       setRemoteSelected([])
+      setRemoteBasePath('')
     }
     void refreshQueueStatus(activeConnection.id)
   }, [activeConnection?.id, activeConnection?.localRoot, activeConnection?.remoteRoot])
@@ -446,6 +564,7 @@ function App() {
     const normalized = list.map((item) => ({
       ...item,
       editorLayout: item.editorLayout ?? 'full',
+      editorLayoutShortcut: item.editorLayoutShortcut ?? defaultEditorLayoutShortcut,
     }))
     setConnections(normalized)
     setActiveConnectionId((prev) => {
@@ -461,22 +580,31 @@ function App() {
     }
   }
 
-  const loadLocalRoot = async (connection: Connection) => {
-    const nodes = await window.simpleSSH.workspace.list({ root: connection.localRoot, depth: 1 })
+  const loadLocalRoot = async (connection: Connection, rootOverride?: string) => {
+    const root = rootOverride ?? connection.localRoot
+    if (!root) return
+    const nodes = await window.simpleSSH.workspace.list({ root, depth: 1 })
     const sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: connection.foldersFirst })
     setLocalColumns([sorted])
     setLocalSelected([])
+    setLocalBasePath(root)
   }
 
-  const loadRemoteRoot = async (connection: Connection, options?: { path?: string; force?: boolean }) => {
+  const loadRemoteRoot = async (
+    connection: Connection,
+    options?: { path?: string; force?: boolean; rootOverride?: string },
+  ) => {
+    const root = options?.rootOverride ?? options?.path ?? connection.remoteRoot
+    if (!root) return
     const response = await window.simpleSSH.workspace.remoteList({
       connectionId: connection.id,
-      path: options?.path ?? connection.remoteRoot,
+      path: root,
       force: options?.force,
     })
     const nodes = (response?.nodes ?? []) as FileNode[]
     setRemoteColumns([sortNodes(nodes, { foldersFirst: connection.foldersFirst })])
     setRemoteSelected([])
+    setRemoteBasePath(root)
   }
 
   const openEditor = async (connection?: Connection) => {
@@ -633,7 +761,7 @@ function App() {
     const result = await window.simpleSSH.workspace.sync({ connectionId: activeConnection.id })
     if (result?.ok) {
       setStatusMessage({ kind: 'ok', message: result.message || 'Sync complete.' })
-      await loadLocalRoot(activeConnection)
+      await loadLocalRoot(activeConnection, localBasePath || activeConnection.localRoot)
     } else {
       setStatusMessage({ kind: 'error', message: result?.message || 'Sync failed.' })
     }
@@ -841,6 +969,25 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    const handleLayoutShortcut = (event: KeyboardEvent) => {
+      if (!builtInEditorPath) return
+      if (event.repeat) return
+      if (isEditableTarget(event.target)) return
+      if (!editorLayoutShortcutSpec) return
+      if (event.ctrlKey !== editorLayoutShortcutSpec.ctrl) return
+      if (event.metaKey !== editorLayoutShortcutSpec.meta) return
+      if (event.altKey !== editorLayoutShortcutSpec.alt) return
+      if (event.shiftKey !== editorLayoutShortcutSpec.shift) return
+      if (editorLayoutShortcutSpec.code && event.code !== editorLayoutShortcutSpec.code) return
+      if (!editorLayoutShortcutSpec.code && event.key.toLowerCase() !== editorLayoutShortcutSpec.key) return
+      event.preventDefault()
+      void updateConnectionLayout(editorLayout === 'full' ? 'split' : 'full')
+    }
+    window.addEventListener('keydown', handleLayoutShortcut)
+    return () => window.removeEventListener('keydown', handleLayoutShortcut)
+  }, [builtInEditorPath, editorLayout, editorLayoutShortcutSpec, updateConnectionLayout])
+
   const handleBuiltInEditorMount: OnMount = (editor, monaco) => {
     builtInEditorRef.current = editor
     console.info('[built-in-editor] mounted')
@@ -1013,13 +1160,13 @@ function App() {
 
   const localPath = useMemo(() => {
     const selected = [...localSelected].reverse().find((node) => node)
-    return selected?.path ?? activeConnection?.localRoot ?? ''
-  }, [localSelected, activeConnection?.localRoot])
+    return selected?.path ?? localBasePath ?? activeConnection?.localRoot ?? ''
+  }, [localSelected, localBasePath, activeConnection?.localRoot])
 
   const remotePath = useMemo(() => {
     const selected = [...remoteSelected].reverse().find((node) => node)
-    return selected?.path ?? activeConnection?.remoteRoot ?? ''
-  }, [remoteSelected, activeConnection?.remoteRoot])
+    return selected?.path ?? remoteBasePath ?? activeConnection?.remoteRoot ?? ''
+  }, [remoteSelected, remoteBasePath, activeConnection?.remoteRoot])
 
   const getActiveColumnIndex = (selected: (FileNode | null)[], columnsLength: number) => {
     if (columnsLength <= 0) return 0
@@ -1027,6 +1174,77 @@ function App() {
       if (selected[index]) return Math.min(index, columnsLength - 1)
     }
     return Math.max(0, columnsLength - 1)
+  }
+
+  const navigateToLocalPath = async (targetPath: string) => {
+    if (!activeConnection) return
+    const parts = splitLocalPath(targetPath)
+    if (parts.length === 0) return
+    let root = parts[0]
+    if (root.endsWith(':')) root = `${root}\\`
+
+    const columns: FileNode[][] = []
+    const selected: (FileNode | null)[] = []
+    let currentPath = root
+    let nodes = await window.simpleSSH.workspace.list({ root: currentPath, depth: 1 })
+    let sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
+    columns.push(sorted)
+
+    for (let index = 1; index < parts.length; index += 1) {
+      const next = parts[index]
+      const expectedPath = `${currentPath.replace(/[\\/]+$/, '')}\\${next}`
+      const match =
+        sorted.find((node) => node.path === expectedPath) ?? sorted.find((node) => node.name === next)
+      if (!match) break
+      selected.push(match)
+      if (match.type !== 'dir') break
+      currentPath = expectedPath
+      nodes = await window.simpleSSH.workspace.list({ root: currentPath, depth: 1 })
+      sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
+      columns.push(sorted)
+    }
+
+    setLocalColumns(columns)
+    setLocalSelected(selected)
+    setLocalBasePath(root)
+  }
+
+  const navigateToRemotePath = async (targetPath: string) => {
+    if (!activeConnection) return
+    const parts = splitRemotePath(targetPath)
+    if (parts.length === 0) return
+    const root = parts[0] === '/' ? '/' : parts[0]
+
+    const columns: FileNode[][] = []
+    const selected: (FileNode | null)[] = []
+    let currentPath = root
+    let response = await window.simpleSSH.workspace.remoteList({
+      connectionId: activeConnection.id,
+      path: currentPath,
+    })
+    let sorted = sortNodes((response?.nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
+    columns.push(sorted)
+
+    for (let index = 1; index < parts.length; index += 1) {
+      const next = parts[index]
+      const expectedPath = currentPath === '/' ? `/${next}` : `${currentPath}/${next}`
+      const match =
+        sorted.find((node) => node.path === expectedPath) ?? sorted.find((node) => node.name === next)
+      if (!match) break
+      selected.push(match)
+      if (match.type !== 'dir') break
+      currentPath = expectedPath
+      response = await window.simpleSSH.workspace.remoteList({
+        connectionId: activeConnection.id,
+        path: currentPath,
+      })
+      sorted = sortNodes((response?.nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
+      columns.push(sorted)
+    }
+
+    setRemoteColumns(columns)
+    setRemoteSelected(selected)
+    setRemoteBasePath(root)
   }
 
   const localActiveColumnIndex = useMemo(
@@ -1040,20 +1258,20 @@ function App() {
   )
 
   const localContext = useMemo(() => {
-    if (!activeConnection?.localRoot || localColumns.length === 0) return null
+    if (!activeConnection || localColumns.length === 0) return null
     const columnIndex = localActiveColumnIndex
     const parent = columnIndex > 0 ? localSelected[columnIndex - 1] : null
-    const parentPath = parent?.type === 'dir' ? parent.path : activeConnection.localRoot
+    const parentPath = parent?.type === 'dir' ? parent.path : localBasePath || activeConnection.localRoot
     return { path: parentPath, columnIndex }
-  }, [activeConnection?.localRoot, localColumns.length, localActiveColumnIndex, localSelected])
+  }, [activeConnection, localColumns.length, localActiveColumnIndex, localSelected, localBasePath])
 
   const remoteContext = useMemo(() => {
-    if (!activeConnection?.remoteRoot || remoteColumns.length === 0) return null
+    if (!activeConnection || remoteColumns.length === 0) return null
     const columnIndex = remoteActiveColumnIndex
     const parent = columnIndex > 0 ? remoteSelected[columnIndex - 1] : null
-    const parentPath = parent?.type === 'dir' ? parent.path : activeConnection.remoteRoot
+    const parentPath = parent?.type === 'dir' ? parent.path : remoteBasePath || activeConnection.remoteRoot
     return { path: parentPath, columnIndex }
-  }, [activeConnection?.remoteRoot, remoteColumns.length, remoteActiveColumnIndex, remoteSelected])
+  }, [activeConnection, remoteColumns.length, remoteActiveColumnIndex, remoteSelected, remoteBasePath])
 
   const activeColumnIndex =
     workspaceView === 'local' ? localActiveColumnIndex : remoteActiveColumnIndex
@@ -1107,6 +1325,11 @@ function App() {
   const breadcrumbSegments = useMemo(() => {
     if (workspaceView === 'remote') return splitRemotePath(remotePath)
     return splitLocalPath(localPath)
+  }, [workspaceView, localPath, remotePath])
+
+  const breadcrumbPaths = useMemo(() => {
+    if (workspaceView === 'remote') return buildRemoteBreadcrumbPaths(remotePath)
+    return buildLocalBreadcrumbPaths(localPath)
   }, [workspaceView, localPath, remotePath])
 
   const queueItems = queueStatus?.recent ?? []
@@ -1445,12 +1668,30 @@ function App() {
               <div className='workspace-tree column-view'>
                 <div className='column-shell'>
                   <div className='breadcrumb-bar'>
-                    {breadcrumbSegments.length === 0 && <span className='breadcrumb-label'>No path selected</span>}
-                    {breadcrumbSegments.map((segment, index) => (
-                      <div className='breadcrumb-seg' key={`${segment}-${index}`}>
+                  {breadcrumbSegments.length === 0 && <span className='breadcrumb-label'>No path selected</span>}
+                  {breadcrumbSegments.map((segment, index) => {
+                    const isCurrent = index === breadcrumbSegments.length - 1
+                    return (
+                      <button
+                        type='button'
+                        className='breadcrumb-seg'
+                        key={`${segment}-${index}`}
+                        onClick={() => {
+                          const target = breadcrumbPaths[index]
+                          if (!target || isCurrent) return
+                          if (workspaceView === 'remote') {
+                            void navigateToRemotePath(target)
+                          } else {
+                            void navigateToLocalPath(target)
+                          }
+                        }}
+                        disabled={isCurrent}
+                        aria-label={`Open ${segment}`}
+                      >
                         <span className='breadcrumb-label'>{segment}</span>
-                      </div>
-                    ))}
+                      </button>
+                    )
+                  })}
                   </div>
                   <div className='column-grid'>
                     {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
@@ -1630,6 +1871,7 @@ function App() {
                       <button
                         className='ghost small'
                         onClick={() => void updateConnectionLayout(editorLayout === 'full' ? 'split' : 'full')}
+                        title={`Toggle layout (${editorLayoutShortcut})`}
                       >
                         {editorLayoutLabel}
                       </button>
@@ -2127,6 +2369,20 @@ function App() {
                       <option value='full'>Full editor</option>
                       <option value='split'>Split 30/70</option>
                     </select>
+                  </label>
+                  <label>
+                    Layout Toggle Shortcut
+                    <input
+                      value={connectionDraft.editorLayoutShortcut}
+                      onChange={(event) =>
+                        setConnectionDraft((prev) => ({
+                          ...prev,
+                          editorLayoutShortcut: event.target.value,
+                        }))
+                      }
+                      placeholder={defaultEditorLayoutShortcut}
+                    />
+                    <div className='hint'>Use format like Ctrl+Shift+L or Cmd+Shift+L.</div>
                   </label>
                   <label>
                     Editor Font Size

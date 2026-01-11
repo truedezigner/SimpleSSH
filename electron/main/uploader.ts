@@ -6,7 +6,7 @@ import { Client, SFTPWrapper } from 'ssh2'
 import chokidar from 'chokidar'
 import PQueue from 'p-queue'
 import { Connection, SyncMode } from './connectionsStore'
-import { ensureCacheRoot, getCacheRoot, resolveRemotePathFromCache } from './remoteCache'
+import { ensureCacheRoot, getCacheRoot, recordCacheEntry, resolveRemotePathFromCache } from './remoteCache'
 
 export interface QueueStatus {
   connectionId: string
@@ -73,6 +73,17 @@ function resolveRemoteTarget(connection: Connection, localPath: string) {
   const cachedRemote = resolveRemotePathFromCache(connection.id, localPath)
   if (cachedRemote) {
     return { remotePath: cachedRemote, source: 'cache' as const }
+  }
+  const cacheRoot = getCacheRoot(connection.id)
+  const cacheRelative = path.relative(cacheRoot, localPath)
+  if (cacheRelative && !cacheRelative.startsWith('..') && !path.isAbsolute(cacheRelative)) {
+    const parts = cacheRelative.split(path.sep)
+    if (parts[0] === '_outside') {
+      return { remotePath: null, source: 'cache' as const }
+    }
+    const remotePath = remoteJoin(connection.remoteRoot, ...parts)
+    recordCacheEntry(connection.id, remotePath, localPath)
+    return { remotePath, source: 'cache' as const }
   }
   const relative = path.relative(connection.localRoot, localPath)
   if (!relative || relative.startsWith('..')) {
