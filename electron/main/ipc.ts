@@ -743,11 +743,39 @@ export function registerIpcHandlers() {
     },
   )
 
+  ipcMain.handle('workspace:readFile', async (_event, payload: { path: string }) => {
+    if (!payload?.path) return { ok: false, message: 'No path provided.' }
+    try {
+      const content = await fs.readFile(payload.path, 'utf8')
+      return { ok: true, message: 'File loaded.', content }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read file.'
+      return { ok: false, message }
+    }
+  })
+
+  ipcMain.handle('workspace:writeFile', async (_event, payload: { path: string; content: string }) => {
+    if (!payload?.path) return { ok: false, message: 'No path provided.' }
+    try {
+      await fs.writeFile(payload.path, payload.content ?? '', 'utf8')
+      return { ok: true, message: 'File saved.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save file.'
+      return { ok: false, message }
+    }
+  })
+
   ipcMain.handle(
     'workspace:showContextMenu',
     async (
       event,
-      payload: { connectionId?: string; path: string; type: 'file' | 'dir'; codeCommand?: string },
+      payload: {
+        connectionId?: string
+        path: string
+        type: 'file' | 'dir'
+        codeCommand?: string
+        editorPreference?: 'built-in' | 'external'
+      },
     ) => {
       if (!payload?.path) return { ok: false, message: 'No path provided.' }
       const codeCommand = payload.codeCommand?.trim() || 'code'
@@ -799,6 +827,19 @@ export function registerIpcHandlers() {
           },
         },
         { type: 'separator' },
+        payload.type === 'file' && payload.editorPreference === 'external'
+          ? {
+              label: 'Open in Built-in Editor',
+              click: () => {
+                if (!window) return
+                window.webContents.send('workspace:openEditorRequest', {
+                  scope: 'local',
+                  path: payload.path,
+                  target: 'built-in',
+                })
+              },
+            }
+          : undefined,
         {
           label: `Open in ${codeCommand}`,
           click: () => {
@@ -832,7 +873,7 @@ export function registerIpcHandlers() {
           label: 'Copy Path',
           click: () => clipboard.writeText(payload.path),
         },
-      ]
+      ].filter(Boolean) as Electron.MenuItemConstructorOptions[]
 
       if (payload.type === 'file' && payload.connectionId) {
         template.push({
@@ -870,7 +911,12 @@ export function registerIpcHandlers() {
     'workspace:showRemoteContextMenu',
     async (
       event,
-      payload: { connectionId: string; path: string; type: 'file' | 'dir' },
+      payload: {
+        connectionId: string
+        path: string
+        type: 'file' | 'dir'
+        editorPreference?: 'built-in' | 'external'
+      },
     ) => {
       if (!payload?.path) return { ok: false, message: 'No path provided.' }
       const window = BrowserWindow.fromWebContents(event.sender) ?? undefined
@@ -926,6 +972,35 @@ export function registerIpcHandlers() {
           },
         },
         { type: 'separator' },
+        payload.type === 'file' && payload.editorPreference === 'external'
+          ? {
+              label: 'Open in Built-in Editor',
+              click: () => {
+                if (!window) return
+                window.webContents.send('workspace:openEditorRequest', {
+                  scope: 'remote',
+                  connectionId: payload.connectionId,
+                  path: normalizedPath,
+                  target: 'built-in',
+                })
+              },
+            }
+          : undefined,
+        payload.type === 'file' && payload.editorPreference === 'built-in'
+          ? {
+              label: 'Open in External Editor',
+              click: () => {
+                if (!window) return
+                window.webContents.send('workspace:openEditorRequest', {
+                  scope: 'remote',
+                  connectionId: payload.connectionId,
+                  path: normalizedPath,
+                  target: 'external',
+                })
+              },
+            }
+          : undefined,
+        payload.type === 'file' ? { type: 'separator' } : undefined,
         {
           label: refreshLabel,
           click: () => {
@@ -999,7 +1074,7 @@ export function registerIpcHandlers() {
           label: 'Copy Remote Path',
           click: () => clipboard.writeText(normalizedPath),
         },
-      ]
+      ].filter(Boolean) as Electron.MenuItemConstructorOptions[]
       const menu = Menu.buildFromTemplate(template)
       menu.popup({ window })
       return { ok: true, message: 'Menu opened.' }

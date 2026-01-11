@@ -6,6 +6,7 @@ import crypto from 'node:crypto'
 export type VerifyMode = 'sha256-remote' | 'download-back'
 export type AuthType = 'password' | 'key'
 export type SyncMode = 'manual' | 'upload' | 'live'
+export type EditorPreference = 'built-in' | 'external'
 
 export interface Connection {
   id: string
@@ -22,6 +23,11 @@ export interface Connection {
   liveSyncIntervalSec: number
   hostingProvider: string
   codeCommand: string
+  editorPreference: EditorPreference
+  editorFontSize: number
+  editorTabSize: number
+  editorSoftTabs: boolean
+  editorWordWrap: boolean
   remoteIndexOnConnect: boolean
   remotePinThreshold: number
   remotePinnedMaxEntries: number
@@ -50,6 +56,11 @@ async function readConnections(): Promise<Connection[]> {
         syncMode: 'manual' as SyncMode,
         liveSyncIntervalSec: 5,
         hostingProvider: 'none',
+        editorPreference: 'external' as EditorPreference,
+        editorFontSize: 14,
+        editorTabSize: 2,
+        editorSoftTabs: true,
+        editorWordWrap: false,
         remoteIndexOnConnect: true,
         remotePinThreshold: 3,
         remotePinnedMaxEntries: 200,
@@ -89,6 +100,11 @@ export async function upsertConnection(input: ConnectionInput) {
     syncMode: 'manual' as SyncMode,
     liveSyncIntervalSec: 5,
     hostingProvider: 'none',
+    editorPreference: 'external' as EditorPreference,
+    editorFontSize: 14,
+    editorTabSize: 2,
+    editorSoftTabs: true,
+    editorWordWrap: false,
     remoteIndexOnConnect: true,
     remotePinThreshold: 3,
     remotePinnedMaxEntries: 200,

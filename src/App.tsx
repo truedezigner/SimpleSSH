@@ -1,10 +1,16 @@
 
 import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react'
+import Editor, { loader, type OnMount } from '@monaco-editor/react'
+import type { editor as MonacoEditor } from 'monaco-editor'
+
+loader.config({ paths: { vs: '/node_modules/monaco-editor/min/vs' } })
 import './App.css'
 
 type VerifyMode = 'sha256-remote' | 'download-back'
 type AuthType = 'password' | 'key'
 type SyncMode = 'manual' | 'upload' | 'live'
+type EditorPreference = 'built-in' | 'external'
+type EditorLayout = 'full' | 'split'
 
 interface Connection {
   id: string
@@ -21,6 +27,12 @@ interface Connection {
   liveSyncIntervalSec: number
   hostingProvider: string
   codeCommand: string
+  editorPreference: EditorPreference
+  editorLayout: EditorLayout
+  editorFontSize: number
+  editorTabSize: number
+  editorSoftTabs: boolean
+  editorWordWrap: boolean
   remoteIndexOnConnect: boolean
   remotePinThreshold: number
   remotePinnedMaxEntries: number
@@ -103,6 +115,12 @@ const defaultConnection = (): ConnectionDraft => ({
   liveSyncIntervalSec: 5,
   hostingProvider: 'none',
   codeCommand: 'code',
+  editorPreference: 'external',
+  editorLayout: 'full',
+  editorFontSize: 14,
+  editorTabSize: 2,
+  editorSoftTabs: true,
+  editorWordWrap: false,
   remoteIndexOnConnect: true,
   remotePinThreshold: 3,
   remotePinnedMaxEntries: 200,
@@ -153,6 +171,43 @@ const formatRelativeTime = (timestamp?: number) => {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+const fileNameFromPath = (value: string) => {
+  const normalized = value.replace(/\\/g, '/')
+  const parts = normalized.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? value
+}
+
+const editorLanguageForName = (name: string) => {
+  const ext = name.split('.').pop()?.toLowerCase()
+  if (!ext || ext === name) return 'plaintext'
+  const map: Record<string, string> = {
+    js: 'javascript',
+    jsx: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    json: 'json',
+    css: 'css',
+    scss: 'scss',
+    html: 'html',
+    yml: 'yaml',
+    yaml: 'yaml',
+    md: 'markdown',
+    sh: 'shell',
+    bash: 'shell',
+    zsh: 'shell',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    java: 'java',
+    c: 'c',
+    cpp: 'cpp',
+    rs: 'rust',
+    php: 'php',
+    xml: 'xml',
+  }
+  return map[ext] ?? 'plaintext'
 }
 
 const fileBadge = (node: FileNode) => {
@@ -215,6 +270,13 @@ function App() {
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null)
+  const [builtInEditorPath, setBuiltInEditorPath] = useState<string | null>(null)
+  const [builtInEditorName, setBuiltInEditorName] = useState('')
+  const [builtInEditorContent, setBuiltInEditorContent] = useState('')
+  const [builtInEditorSavedContent, setBuiltInEditorSavedContent] = useState('')
+  const [builtInEditorLoading, setBuiltInEditorLoading] = useState(false)
+  const [builtInEditorSaving, setBuiltInEditorSaving] = useState(false)
+  const [builtInEditorError, setBuiltInEditorError] = useState<string | null>(null)
 
   const [queueStatusMap, setQueueStatusMap] = useState<Record<string, QueueStatus>>({})
 
@@ -238,6 +300,36 @@ function App() {
     return queueStatus.recent.filter((item) => item.note?.toLowerCase().includes('remote won'))
   }, [queueStatus])
 
+  const builtInEditorDirty = Boolean(
+    builtInEditorPath && builtInEditorContent !== builtInEditorSavedContent,
+  )
+
+  const builtInEditorLanguage = useMemo(
+    () => editorLanguageForName(builtInEditorName),
+    [builtInEditorName],
+  )
+
+  const builtInEditorOptions = useMemo(
+    () => ({
+      fontSize: activeConnection?.editorFontSize ?? 14,
+      tabSize: activeConnection?.editorTabSize ?? 2,
+      insertSpaces: activeConnection?.editorSoftTabs ?? true,
+      wordWrap: activeConnection?.editorWordWrap ? 'on' : 'off',
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      fontFamily: `'JetBrains Mono', 'Fira Code', 'SF Mono', monospace`,
+    }),
+    [
+      activeConnection?.editorFontSize,
+      activeConnection?.editorTabSize,
+      activeConnection?.editorSoftTabs,
+      activeConnection?.editorWordWrap,
+    ],
+  )
+
+  const editorLayout = activeConnection?.editorLayout ?? 'full'
+  const editorLayoutLabel = editorLayout === 'full' ? 'Split 30/70' : 'Full width'
+
   const activeConnectionIdRef = useRef<string | null>(null)
   const activeConnectionRef = useRef<Connection | null>(null)
   const connectionDraftIdRef = useRef<string | null>(null)
@@ -245,6 +337,7 @@ function App() {
   const addMenuRef = useRef<HTMLDivElement | null>(null)
   const createDraftInputRef = useRef<HTMLInputElement | null>(null)
   const renameDraftInputRef = useRef<HTMLInputElement | null>(null)
+  const builtInEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
 
   useEffect(() => {
     activeConnectionIdRef.current = activeConnectionId
@@ -350,10 +443,14 @@ function App() {
   const loadConnections = async () => {
     const raw = await window.simpleSSH.connections.list()
     const list = (Array.isArray(raw) ? raw : []) as Connection[]
-    setConnections(list)
+    const normalized = list.map((item) => ({
+      ...item,
+      editorLayout: item.editorLayout ?? 'full',
+    }))
+    setConnections(normalized)
     setActiveConnectionId((prev) => {
-      if (prev && list.some((item) => item.id === prev)) return prev
-      return list[0]?.id ?? null
+      if (prev && normalized.some((item) => item.id === prev)) return prev
+      return normalized[0]?.id ?? null
     })
   }
 
@@ -426,6 +523,14 @@ function App() {
     if (!Number.isFinite(interval) || interval < 1 || interval > 300) {
       errors.liveSyncIntervalSec = 'Interval must be between 1 and 300 seconds.'
     }
+    const fontSize = Number(connectionDraft.editorFontSize)
+    if (!Number.isFinite(fontSize) || fontSize < 8 || fontSize > 32) {
+      errors.editorFontSize = 'Font size must be between 8 and 32.'
+    }
+    const tabSize = Number(connectionDraft.editorTabSize)
+    if (!Number.isFinite(tabSize) || tabSize < 1 || tabSize > 8) {
+      errors.editorTabSize = 'Tab size must be between 1 and 8.'
+    }
     return errors
   }
 
@@ -441,6 +546,8 @@ function App() {
       ...connectionDraft,
       liveSyncIntervalSec: Number(connectionDraft.liveSyncIntervalSec),
       port: Number(connectionDraft.port),
+      editorFontSize: Number(connectionDraft.editorFontSize),
+      editorTabSize: Number(connectionDraft.editorTabSize),
     }
     const result = await window.simpleSSH.connections.upsert({
       connection: payload,
@@ -639,48 +746,206 @@ function App() {
     }, 700)
   }
 
-  const handleDownloadRemoteFile = async (node: FileNode) => {
-    if (!activeConnection) return
-    const useCache = Boolean(activeConnection.remoteFirstEditing)
-    const result = useCache
-      ? await window.simpleSSH.workspace.downloadRemoteFileToCache({
-          connectionId: activeConnection.id,
-          remotePath: node.path,
-        })
-      : await window.simpleSSH.workspace.downloadRemoteFile({
-          connectionId: activeConnection.id,
-          remotePath: node.path,
-        })
-    if (!result?.ok) {
-      setStatusMessage({ kind: 'error', message: result?.message || 'Download failed.' })
-      return
+  const confirmDiscardEditorChanges = () => {
+    if (!builtInEditorDirty) return true
+    return window.confirm('Discard unsaved changes?')
+  }
+
+  const openBuiltInEditorForPath = async (path: string) => {
+    if (!path) return false
+    if (!confirmDiscardEditorChanges()) return false
+    setBuiltInEditorLoading(true)
+    setBuiltInEditorError(null)
+    setBuiltInEditorPath(path)
+    setBuiltInEditorName(fileNameFromPath(path))
+    console.info('[built-in-editor] load start', { path })
+    const result = await window.simpleSSH.workspace.readFile({ path })
+    console.info('[built-in-editor] load result', {
+      path,
+      ok: result?.ok,
+      message: result?.message,
+      contentLength: typeof result?.content === 'string' ? result.content.length : null,
+    })
+    if (result?.ok && typeof result.content === 'string') {
+      setBuiltInEditorContent(result.content)
+      setBuiltInEditorSavedContent(result.content)
+      setBuiltInEditorError(null)
+      setBuiltInEditorLoading(false)
+      window.setTimeout(() => builtInEditorRef.current?.focus(), 0)
+      return true
     }
-    if (useCache && result.localPath) {
-      const openResult = await window.simpleSSH.workspace.openInEditor({
-        path: result.localPath,
-        codeCommand: activeConnection.codeCommand,
-      })
-      if (openResult?.ok) {
-        setStatusMessage({ kind: 'ok', message: openResult.message || 'Downloaded to cache and opened.' })
-      } else {
-        setStatusMessage({ kind: 'error', message: openResult?.message || 'Downloaded but failed to open.' })
+    setBuiltInEditorContent('')
+    setBuiltInEditorSavedContent('')
+    setBuiltInEditorError(result?.message || 'Failed to load file.')
+    setBuiltInEditorLoading(false)
+    return false
+  }
+
+  const handleSaveBuiltInEditor = async () => {
+    if (!builtInEditorPath) return
+    setBuiltInEditorSaving(true)
+    const result = await window.simpleSSH.workspace.writeFile({
+      path: builtInEditorPath,
+      content: builtInEditorContent,
+    })
+    if (result?.ok) {
+      setBuiltInEditorSavedContent(builtInEditorContent)
+      setStatusMessage({ kind: 'ok', message: result.message || 'File saved.' })
+    } else {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to save file.' })
+    }
+    setBuiltInEditorSaving(false)
+  }
+
+  const handleCloseBuiltInEditor = () => {
+    if (!confirmDiscardEditorChanges()) return
+    setBuiltInEditorPath(null)
+    setBuiltInEditorName('')
+    setBuiltInEditorContent('')
+    setBuiltInEditorSavedContent('')
+    setBuiltInEditorError(null)
+  }
+
+  const updateConnectionLayout = async (layout: EditorLayout) => {
+    if (!activeConnection) return
+    const updated = { ...activeConnection, editorLayout: layout }
+    setConnections((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    if (connectionDraft.id === updated.id) {
+      setConnectionDraft((prev) => ({ ...prev, editorLayout: layout }))
+    }
+
+    let password: string | undefined
+    let privateKey: string | undefined
+    let passphrase: string | undefined
+    if (updated.authType === 'password') {
+      password = (await window.simpleSSH.connections.getPassword(updated.id)) ?? undefined
+    } else {
+      ;[privateKey, passphrase] = await Promise.all([
+        window.simpleSSH.connections.getPrivateKey(updated.id),
+        window.simpleSSH.connections.getPassphrase(updated.id),
+      ])
+    }
+
+    const result = await window.simpleSSH.connections.upsert({
+      connection: updated,
+      password,
+      privateKey,
+      passphrase,
+    })
+
+    if (result && typeof result === 'object' && 'id' in result) {
+      await loadConnections()
+      setStatusMessage({ kind: 'ok', message: `Editor layout set to ${layout === 'full' ? 'full' : '30/70'}.` })
+    } else {
+      setStatusMessage({ kind: 'error', message: 'Failed to update editor layout.' })
+    }
+  }
+
+  const handleBuiltInEditorMount: OnMount = (editor, monaco) => {
+    builtInEditorRef.current = editor
+    console.info('[built-in-editor] mounted')
+    monaco.editor.defineTheme('simpleSSH-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '6e6885' },
+        { token: 'keyword', foreground: '9d8cff' },
+        { token: 'string', foreground: '8cf6c4' },
+        { token: 'number', foreground: 'ff9aad' },
+      ],
+      colors: {
+        'editor.background': '#0b0a18',
+        'editor.foreground': '#f2efff',
+        'editor.lineHighlightBackground': '#141129',
+        'editorLineNumber.foreground': '#534d6a',
+        'editorLineNumber.activeForeground': '#c7c3dd',
+        'editor.selectionBackground': '#3b2d6b',
+        'editor.inactiveSelectionBackground': '#2a2346',
+        'editorCursor.foreground': '#ff9edb',
+        'editorIndentGuide.background': '#261f3f',
+        'editorIndentGuide.activeBackground': '#3a3161',
+        'editorWhitespace.foreground': '#241f3b',
+        'editorGutter.background': '#0b0a18',
+      },
+    })
+    monaco.editor.setTheme('simpleSSH-dark')
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      void handleSaveBuiltInEditor()
+    })
+  }
+
+  const openLocalPathInEditor = async (
+    path: string,
+    target: 'auto' | 'built-in' | 'external' = 'auto',
+    connectionOverride?: Connection | null,
+  ) => {
+    const connection = connectionOverride ?? activeConnectionRef.current
+    if (!connection) return
+    const preference = target === 'auto' ? connection.editorPreference : target
+    if (preference === 'built-in') {
+      const opened = await openBuiltInEditorForPath(path)
+      if (opened) {
+        setStatusMessage({ kind: 'ok', message: 'Opened in built-in editor.' })
       }
       return
     }
-    setStatusMessage({ kind: 'ok', message: 'Downloaded remote file.' })
-  }
-
-  const handleOpenLocalFile = async (node: FileNode) => {
-    if (!activeConnection) return
     const result = await window.simpleSSH.workspace.openInEditor({
-      path: node.path,
-      codeCommand: activeConnection.codeCommand,
+      path,
+      codeCommand: connection.codeCommand,
     })
     if (result?.ok) {
       setStatusMessage({ kind: 'ok', message: result.message || 'Opened in editor.' })
     } else {
       setStatusMessage({ kind: 'error', message: result?.message || 'Failed to open editor.' })
     }
+  }
+
+  const openRemotePathInEditor = async (
+    remotePath: string,
+    target: 'auto' | 'built-in' | 'external' = 'auto',
+    connectionOverride?: Connection | null,
+  ) => {
+    const connection = connectionOverride ?? activeConnectionRef.current
+    if (!connection) return
+    const preference = target === 'auto' ? connection.editorPreference : target
+    const useCache = Boolean(connection.remoteFirstEditing)
+    const result = useCache
+      ? await window.simpleSSH.workspace.downloadRemoteFileToCache({
+          connectionId: connection.id,
+          remotePath,
+        })
+      : await window.simpleSSH.workspace.downloadRemoteFile({
+          connectionId: connection.id,
+          remotePath,
+        })
+    if (!result?.ok || !result.localPath) {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Download failed.' })
+      return
+    }
+    if (preference === 'built-in') {
+      const opened = await openBuiltInEditorForPath(result.localPath)
+      if (opened) {
+        setStatusMessage({ kind: 'ok', message: 'Downloaded and opened in built-in editor.' })
+      }
+      return
+    }
+    const openResult = await window.simpleSSH.workspace.openInEditor({
+      path: result.localPath,
+      codeCommand: connection.codeCommand,
+    })
+    if (openResult?.ok) {
+      setStatusMessage({ kind: 'ok', message: openResult.message || 'Downloaded and opened.' })
+    } else {
+      setStatusMessage({ kind: 'error', message: openResult?.message || 'Downloaded but failed to open.' })
+    }
+  }
+
+  const handleOpenLocalFile = async (node: FileNode, target: 'auto' | 'built-in' | 'external' = 'auto') => {
+    void openLocalPathInEditor(node.path, target)
+  }
+
+  const handleOpenRemoteFile = async (node: FileNode, target: 'auto' | 'built-in' | 'external' = 'auto') => {
+    void openRemotePathInEditor(node.path, target)
   }
 
   const handleShowContext = async (node: FileNode) => {
@@ -690,6 +955,7 @@ function App() {
       path: node.path,
       type: node.type,
       codeCommand: activeConnection.codeCommand,
+      editorPreference: activeConnection.editorPreference,
     })
   }
 
@@ -699,6 +965,7 @@ function App() {
       connectionId: activeConnection.id,
       path: node.path,
       type: node.type,
+      editorPreference: activeConnection.editorPreference,
     })
   }
 
@@ -1101,6 +1368,22 @@ function App() {
     }
   }, [localColumns, localActiveColumnIndex])
 
+  useEffect(() => {
+    const unsubscribe = window.simpleSSH.workspace.onOpenEditorRequest((payload) => {
+      if (!payload?.path) return
+      const connection = activeConnectionRef.current
+      if (payload.scope === 'local') {
+        void openLocalPathInEditor(payload.path, payload.target, connection)
+        return
+      }
+      if (!connection || payload.connectionId !== connection.id) return
+      void openRemotePathInEditor(payload.path, payload.target, connection)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [openLocalPathInEditor, openRemotePathInEditor])
+
   return (
     <div className='app-shell'>
       <div className='topbar'>
@@ -1151,180 +1434,250 @@ function App() {
         </div>
       </div>
 
-      <div className='stage'>
+      <div className={`stage ${builtInEditorPath ? 'with-editor' : ''}`}>
         <div className='panel workspace'>
-          <div className='workspace-tree column-view'>
-            <div className='column-shell'>
-              <div className='breadcrumb-bar'>
-                {breadcrumbSegments.length === 0 && <span className='breadcrumb-label'>No path selected</span>}
-                {breadcrumbSegments.map((segment, index) => (
-                  <div className='breadcrumb-seg' key={`${segment}-${index}`}>
-                    <span className='breadcrumb-label'>{segment}</span>
+          <div
+            className={`workspace-split ${builtInEditorPath ? 'with-editor' : ''} ${
+              editorLayout === 'split' ? 'layout-split' : 'layout-full'
+            }`}
+          >
+            <div className='workspace-explorer'>
+              <div className='workspace-tree column-view'>
+                <div className='column-shell'>
+                  <div className='breadcrumb-bar'>
+                    {breadcrumbSegments.length === 0 && <span className='breadcrumb-label'>No path selected</span>}
+                    {breadcrumbSegments.map((segment, index) => (
+                      <div className='breadcrumb-seg' key={`${segment}-${index}`}>
+                        <span className='breadcrumb-label'>{segment}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className='column-grid'>
-                {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
-                    <div className={`column ${columnIndex > 0 ? 'linked' : ''}`} key={`col-${columnIndex}`}>
-                      <div className='column-list scroll-hide' onScroll={handleScrollVisibility}>
-                        {createDraft &&
-                          createDraft.columnIndex === columnIndex &&
-                          createDraft.scope === workspaceView &&
-                          createDraft.parentPath && (
-                            <div className='column-item draft'>
-                              <span className={`file-badge ${createDraft.type === 'dir' ? 'type-dir' : ''}`}>
-                                {createDraft.type === 'dir' ? 'dir' : 'file'}
-                              </span>
-                              <input
-                                ref={createDraftInputRef}
-                                className='column-input'
-                                value={createDraft.name}
-                                placeholder={createDraft.type === 'dir' ? 'New folder' : 'New file'}
-                                onChange={(event) =>
-                                  setCreateDraft((prev) =>
-                                    prev ? { ...prev, name: event.target.value } : prev,
-                                  )
-                                }
-                                onBlur={(event) => void commitCreateDraft(event.currentTarget.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault()
-                                    void commitCreateDraft(event.currentTarget.value)
+                  <div className='column-grid'>
+                    {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
+                      <div className={`column ${columnIndex > 0 ? 'linked' : ''}`} key={`col-${columnIndex}`}>
+                        <div className='column-list scroll-hide' onScroll={handleScrollVisibility}>
+                          {createDraft &&
+                            createDraft.columnIndex === columnIndex &&
+                            createDraft.scope === workspaceView &&
+                            createDraft.parentPath && (
+                              <div className='column-item draft'>
+                                <span className={`file-badge ${createDraft.type === 'dir' ? 'type-dir' : ''}`}>
+                                  {createDraft.type === 'dir' ? 'dir' : 'file'}
+                                </span>
+                                <input
+                                  ref={createDraftInputRef}
+                                  className='column-input'
+                                  value={createDraft.name}
+                                  placeholder={createDraft.type === 'dir' ? 'New folder' : 'New file'}
+                                  onChange={(event) =>
+                                    setCreateDraft((prev) =>
+                                      prev ? { ...prev, name: event.target.value } : prev,
+                                    )
                                   }
-                                  if (event.key === 'Escape') {
-                                    event.preventDefault()
-                                    setCreateDraft(null)
-                                  }
-                                }}
-                              />
-                            </div>
-                          )}
-                        {column.map((node) => {
-                          const isActive =
-                            workspaceView === 'local'
-                              ? localSelected[columnIndex]?.path === node.path
-                              : remoteSelected[columnIndex]?.path === node.path
-                          const badge = fileBadge(node)
-                          const isRenaming =
-                            renameDraft?.scope === workspaceView &&
-                            renameDraft?.path === node.path &&
-                            renameDraft.columnIndex === columnIndex
-                          return (
-                            <div
-                              key={node.path}
-                              className={`column-item ${node.type} ${isActive ? 'active' : ''}`}
-                              onClick={() =>
-                              workspaceView === 'local'
-                                ? void handleLocalSelect(node, columnIndex)
-                                : void handleRemoteSelect(node, columnIndex)
-                            }
-                            onDoubleClick={() => {
-                              if (workspaceView === 'local' && node.type === 'file') {
-                                void handleOpenLocalFile(node)
-                              }
-                              if (workspaceView === 'remote' && node.type === 'file') {
-                                void handleDownloadRemoteFile(node)
-                              }
-                            }}
-                            onContextMenu={() => {
-                              if (workspaceView === 'local') {
-                                void handleShowContext(node)
-                              } else {
-                                void handleShowRemoteContext(node)
-                              }
-                            }}
-                          >
-                            <span className={badge.className}>{badge.label}</span>
-                            {isRenaming ? (
-                              <input
-                                ref={renameDraftInputRef}
-                                className='column-input'
-                                value={renameDraft.name}
-                                onChange={(event) =>
-                                  setRenameDraft((prev) =>
-                                    prev ? { ...prev, name: event.target.value } : prev,
-                                  )
-                                }
-                                onBlur={(event) => void commitRenameDraft(event.currentTarget.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault()
-                                    void commitRenameDraft(event.currentTarget.value)
-                                  }
-                                  if (event.key === 'Escape') {
-                                    event.preventDefault()
-                                    setRenameDraft(null)
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <div className='column-name'>{node.name}</div>
+                                  onBlur={(event) => void commitCreateDraft(event.currentTarget.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                      event.preventDefault()
+                                      void commitCreateDraft(event.currentTarget.value)
+                                    }
+                                    if (event.key === 'Escape') {
+                                      event.preventDefault()
+                                      setCreateDraft(null)
+                                    }
+                                  }}
+                                />
+                              </div>
                             )}
-                            {node.type === 'file' && <div className='column-size'>{formatBytes(node.size)}</div>}
-                          </div>
-                        )
-                      })}
-                      {column.length === 0 && <div className='empty'>Empty</div>}
-                    </div>
-                    {columnIndex === activeColumnIndex && canCreateItem && (
-                      <div className='column-actions' ref={addMenuRef}>
-                        <button
-                          className='ghost small column-action'
-                          onClick={() =>
-                            setAddMenuColumnIndex((prev) => (prev === columnIndex ? null : columnIndex))
-                          }
-                          aria-label='Add file or folder'
-                        >
-                          +
-                        </button>
-                        {addMenuColumnIndex === columnIndex && (
-                          <div className='add-menu column-menu'>
-                            <button
-                              className='ghost small'
-                              onClick={() => {
-                                if (!activeConnection) return
-                                if (workspaceView === 'local') {
-                                  if (!localContext) return
-                                  beginCreateDraft('local', 'file', localContext.path, localContext.columnIndex)
-                                } else {
-                                  if (!remoteContext) return
-                                  beginCreateDraft('remote', 'file', remoteContext.path, remoteContext.columnIndex)
+                          {column.map((node) => {
+                            const isActive =
+                              workspaceView === 'local'
+                                ? localSelected[columnIndex]?.path === node.path
+                                : remoteSelected[columnIndex]?.path === node.path
+                            const badge = fileBadge(node)
+                            const isRenaming =
+                              renameDraft?.scope === workspaceView &&
+                              renameDraft?.path === node.path &&
+                              renameDraft.columnIndex === columnIndex
+                            return (
+                              <div
+                                key={node.path}
+                                className={`column-item ${node.type} ${isActive ? 'active' : ''}`}
+                                onClick={() =>
+                                  workspaceView === 'local'
+                                    ? void handleLocalSelect(node, columnIndex)
+                                    : void handleRemoteSelect(node, columnIndex)
                                 }
-                              }}
-                            >
-                              New File
-                            </button>
+                                onDoubleClick={() => {
+                                  if (workspaceView === 'local' && node.type === 'file') {
+                                    void handleOpenLocalFile(node)
+                                  }
+                                  if (workspaceView === 'remote' && node.type === 'file') {
+                                    void handleOpenRemoteFile(node)
+                                  }
+                                }}
+                                onContextMenu={() => {
+                                  if (workspaceView === 'local') {
+                                    void handleShowContext(node)
+                                  } else {
+                                    void handleShowRemoteContext(node)
+                                  }
+                                }}
+                              >
+                                <span className={badge.className}>{badge.label}</span>
+                                {isRenaming ? (
+                                  <input
+                                    ref={renameDraftInputRef}
+                                    className='column-input'
+                                    value={renameDraft.name}
+                                    onChange={(event) =>
+                                      setRenameDraft((prev) =>
+                                        prev ? { ...prev, name: event.target.value } : prev,
+                                      )
+                                    }
+                                    onBlur={(event) => void commitRenameDraft(event.currentTarget.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter') {
+                                        event.preventDefault()
+                                        void commitRenameDraft(event.currentTarget.value)
+                                      }
+                                      if (event.key === 'Escape') {
+                                        event.preventDefault()
+                                        setRenameDraft(null)
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div className='column-name'>{node.name}</div>
+                                )}
+                                {node.type === 'file' && <div className='column-size'>{formatBytes(node.size)}</div>}
+                              </div>
+                            )
+                          })}
+                          {column.length === 0 && <div className='empty'>Empty</div>}
+                        </div>
+                        {columnIndex === activeColumnIndex && canCreateItem && (
+                          <div className='column-actions' ref={addMenuRef}>
                             <button
-                              className='ghost small'
-                              onClick={() => {
-                                if (!activeConnection) return
-                                if (workspaceView === 'local') {
-                                  if (!localContext) return
-                                  beginCreateDraft('local', 'dir', localContext.path, localContext.columnIndex)
-                                } else {
-                                  if (!remoteContext) return
-                                  beginCreateDraft('remote', 'dir', remoteContext.path, remoteContext.columnIndex)
-                                }
-                              }}
+                              className='ghost small column-action'
+                              onClick={() =>
+                                setAddMenuColumnIndex((prev) => (prev === columnIndex ? null : columnIndex))
+                              }
+                              aria-label='Add file or folder'
                             >
-                              New Folder
+                              +
                             </button>
+                            {addMenuColumnIndex === columnIndex && (
+                              <div className='add-menu column-menu'>
+                                <button
+                                  className='ghost small'
+                                  onClick={() => {
+                                    if (!activeConnection) return
+                                    if (workspaceView === 'local') {
+                                      if (!localContext) return
+                                      beginCreateDraft('local', 'file', localContext.path, localContext.columnIndex)
+                                    } else {
+                                      if (!remoteContext) return
+                                      beginCreateDraft('remote', 'file', remoteContext.path, remoteContext.columnIndex)
+                                    }
+                                  }}
+                                >
+                                  New File
+                                </button>
+                                <button
+                                  className='ghost small'
+                                  onClick={() => {
+                                    if (!activeConnection) return
+                                    if (workspaceView === 'local') {
+                                      if (!localContext) return
+                                      beginCreateDraft('local', 'dir', localContext.path, localContext.columnIndex)
+                                    } else {
+                                      if (!remoteContext) return
+                                      beginCreateDraft('remote', 'dir', remoteContext.path, remoteContext.columnIndex)
+                                    }
+                                  }}
+                                >
+                                  New Folder
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
+                    ))}
+                    {(workspaceView === 'local' ? localColumns : remoteColumns).length === 0 && (
+                      <div className='empty'>
+                        <div>No items loaded yet.</div>
+                        <div>Select a connection and refresh the workspace.</div>
+                      </div>
                     )}
                   </div>
-                ))}
-                {(workspaceView === 'local' ? localColumns : remoteColumns).length === 0 && (
-                  <div className='empty'>
-                    <div>No items loaded yet.</div>
-                    <div>Select a connection and refresh the workspace.</div>
-                  </div>
-                )}
+                </div>
               </div>
             </div>
+            <div className={`workspace-editor ${builtInEditorPath ? 'open' : ''}`}>
+              {builtInEditorPath && (
+                <div className='panel code-editor-panel'>
+                  <div className='code-editor-header'>
+                    <div>
+                      <div className='panel-title'>Code Editor</div>
+                      <div className='code-editor-title-row'>
+                        <div className='code-editor-name'>{builtInEditorName || 'Untitled'}</div>
+                        {builtInEditorDirty && <div className='code-editor-dirty'>Unsaved</div>}
+                      </div>
+                      <div className='code-editor-path'>{builtInEditorPath}</div>
+                    </div>
+                    <div className='code-editor-actions'>
+                      <button
+                        className='ghost small'
+                        onClick={() => void updateConnectionLayout(editorLayout === 'full' ? 'split' : 'full')}
+                      >
+                        {editorLayoutLabel}
+                      </button>
+                      <button
+                        className='ghost small'
+                        onClick={() => {
+                          if (!activeConnection || !builtInEditorPath) return
+                          void window.simpleSSH.workspace.openInEditor({
+                            path: builtInEditorPath,
+                            codeCommand: activeConnection.codeCommand,
+                          })
+                        }}
+                        disabled={!activeConnection}
+                      >
+                        Open External
+                      </button>
+                      <button className='ghost small' onClick={handleCloseBuiltInEditor}>
+                        Close
+                      </button>
+                      <button
+                        className='primary small'
+                        onClick={() => void handleSaveBuiltInEditor()}
+                        disabled={!builtInEditorDirty || builtInEditorSaving}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                  <div className='code-editor-body'>
+                    {builtInEditorLoading ? (
+                      <div className='code-editor-empty'>Loading file...</div>
+                    ) : (
+                      <Editor
+                        height='100%'
+                        value={builtInEditorContent}
+                        language={builtInEditorLanguage}
+                        theme='simpleSSH-dark'
+                        onMount={handleBuiltInEditorMount}
+                        onChange={(value) => setBuiltInEditorContent(value ?? '')}
+                        options={builtInEditorOptions}
+                      />
+                    )}
+                  </div>
+                  {builtInEditorError && <div className='status error'>{builtInEditorError}</div>}
+                </div>
+              )}
+            </div>
           </div>
-
         </div>
       </div>
 
@@ -1557,6 +1910,26 @@ function App() {
                 />
                 <span>Folders above files</span>
               </label>
+              <label className='checkbox-row'>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.editorSoftTabs}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, editorSoftTabs: event.target.checked }))
+                  }
+                />
+                <span>Editor soft tabs</span>
+              </label>
+              <label className='checkbox-row'>
+                <input
+                  type='checkbox'
+                  checked={connectionDraft.editorWordWrap}
+                  onChange={(event) =>
+                    setConnectionDraft((prev) => ({ ...prev, editorWordWrap: event.target.checked }))
+                  }
+                />
+                <span>Editor word wrap</span>
+              </label>
               <label>
                 Name
                 <input
@@ -1721,14 +2094,76 @@ function App() {
                   }
                 />
               </label>
-              <label>
-                Code Command
-                <input
-                  value={connectionDraft.codeCommand}
-                  onChange={(event) => setConnectionDraft((prev) => ({ ...prev, codeCommand: event.target.value }))}
-                  placeholder='code'
-                />
-              </label>
+
+              <div className='form-section'>
+                <div className='form-section-title'>Code Editor</div>
+                <div className='form-section-grid'>
+                  <label>
+                    Editor Preference
+                    <select
+                      value={connectionDraft.editorPreference}
+                      onChange={(event) =>
+                        setConnectionDraft((prev) => ({
+                          ...prev,
+                          editorPreference: event.target.value as EditorPreference,
+                        }))
+                      }
+                    >
+                      <option value='external'>External editor</option>
+                      <option value='built-in'>Built-in editor</option>
+                    </select>
+                  </label>
+                  <label>
+                    Editor Layout
+                    <select
+                      value={connectionDraft.editorLayout}
+                      onChange={(event) =>
+                        setConnectionDraft((prev) => ({
+                          ...prev,
+                          editorLayout: event.target.value as EditorLayout,
+                        }))
+                      }
+                    >
+                      <option value='full'>Full editor</option>
+                      <option value='split'>Split 30/70</option>
+                    </select>
+                  </label>
+                  <label>
+                    Editor Font Size
+                    <input
+                      type='number'
+                      min={8}
+                      max={32}
+                      value={connectionDraft.editorFontSize}
+                      onChange={(event) =>
+                        setConnectionDraft((prev) => ({ ...prev, editorFontSize: Number(event.target.value) }))
+                      }
+                    />
+                    {connectionErrors.editorFontSize && <div className='error'>{connectionErrors.editorFontSize}</div>}
+                  </label>
+                  <label>
+                    Editor Tab Size
+                    <input
+                      type='number'
+                      min={1}
+                      max={8}
+                      value={connectionDraft.editorTabSize}
+                      onChange={(event) =>
+                        setConnectionDraft((prev) => ({ ...prev, editorTabSize: Number(event.target.value) }))
+                      }
+                    />
+                    {connectionErrors.editorTabSize && <div className='error'>{connectionErrors.editorTabSize}</div>}
+                  </label>
+                  <label>
+                    External Editor Command
+                    <input
+                      value={connectionDraft.codeCommand}
+                      onChange={(event) => setConnectionDraft((prev) => ({ ...prev, codeCommand: event.target.value }))}
+                      placeholder='code'
+                    />
+                  </label>
+                </div>
+              </div>
 
               {connectionDraft.authType === 'password' && (
                 <label className='password-row'>

@@ -52,6 +52,9 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       ipcRenderer.invoke('workspace:clearRemoteCache', payload),
     getQueueStatus: (payload: { connectionId: string }) =>
       ipcRenderer.invoke('workspace:getQueueStatus', payload),
+    readFile: (payload: { path: string }) => ipcRenderer.invoke('workspace:readFile', payload),
+    writeFile: (payload: { path: string; content: string }) =>
+      ipcRenderer.invoke('workspace:writeFile', payload),
     onStatus: (handler: (status: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, status: unknown) => handler(status)
       ipcRenderer.on('workspace:status', listener)
@@ -71,10 +74,36 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       path: string
       type: 'file' | 'dir'
       codeCommand?: string
+      editorPreference?: 'built-in' | 'external'
     }) =>
       ipcRenderer.invoke('workspace:showContextMenu', payload),
-    showRemoteContextMenu: (payload: { connectionId: string; path: string; type: 'file' | 'dir' }) =>
+    showRemoteContextMenu: (payload: {
+      connectionId: string
+      path: string
+      type: 'file' | 'dir'
+      editorPreference?: 'built-in' | 'external'
+    }) =>
       ipcRenderer.invoke('workspace:showRemoteContextMenu', payload),
+    onOpenEditorRequest: (
+      handler: (payload: {
+        scope: 'local' | 'remote'
+        path: string
+        connectionId?: string
+        target: 'built-in' | 'external'
+      }) => void,
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: {
+          scope: 'local' | 'remote'
+          path: string
+          connectionId?: string
+          target: 'built-in' | 'external'
+        },
+      ) => handler(payload)
+      ipcRenderer.on('workspace:openEditorRequest', listener)
+      return () => ipcRenderer.removeListener('workspace:openEditorRequest', listener)
+    },
     onCreateItemPrompt: (
       handler: (payload: { scope: 'local' | 'remote'; parentPath: string; type: 'file' | 'dir' }) => void,
     ) => {

@@ -53,6 +53,8 @@ interface Window {
       clearQueueHistory: (payload: { connectionId: string }) => Promise<unknown | null>
       clearRemoteCache: (payload: { connectionId: string }) => Promise<{ ok: boolean; message: string }>
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
+      readFile: (payload: { path: string }) => Promise<{ ok: boolean; message: string; content?: string }>
+      writeFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; message: string }>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void
       onStatus: (handler: (status: unknown) => void) => () => void
@@ -61,12 +63,22 @@ interface Window {
         path: string
         type: 'file' | 'dir'
         codeCommand?: string
+        editorPreference?: 'built-in' | 'external'
       }) => Promise<{ ok: boolean; message: string }>
       showRemoteContextMenu: (payload: {
         connectionId: string
         path: string
         type: 'file' | 'dir'
+        editorPreference?: 'built-in' | 'external'
       }) => Promise<{ ok: boolean; message: string }>
+      onOpenEditorRequest: (
+        handler: (payload: {
+          scope: 'local' | 'remote'
+          path: string
+          connectionId?: string
+          target: 'built-in' | 'external'
+        }) => void,
+      ) => () => void
       onCreateItemPrompt: (
         handler: (payload: { scope: 'local' | 'remote'; parentPath: string; type: 'file' | 'dir' }) => void,
       ) => () => void
