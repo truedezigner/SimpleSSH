@@ -1033,6 +1033,12 @@ textarea:focus {
   padding-right: 4px;
 }
 
+.column-list.drop-target {
+  outline: 1px dashed rgba(156, 241, 255, 0.6);
+  background: rgba(16, 12, 36, 0.35);
+  border-radius: 8px;
+}
+
 .scroll-hide {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;

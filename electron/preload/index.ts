@@ -55,6 +55,10 @@ contextBridge.exposeInMainWorld('simpleSSH', {
     readFile: (payload: { path: string }) => ipcRenderer.invoke('workspace:readFile', payload),
     writeFile: (payload: { path: string; content: string }) =>
       ipcRenderer.invoke('workspace:writeFile', payload),
+    importLocalFiles: (payload: { targetDir: string; paths: string[] }) =>
+      ipcRenderer.invoke('workspace:importLocalFiles', payload),
+    importRemoteFiles: (payload: { connectionId: string; targetDir: string; paths: string[] }) =>
+      ipcRenderer.invoke('workspace:importRemoteFiles', payload),
     onStatus: (handler: (status: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, status: unknown) => handler(status)
       ipcRenderer.on('workspace:status', listener)

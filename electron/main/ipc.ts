@@ -47,6 +47,23 @@ function revealLabel() {
   return process.platform === 'darwin' ? 'Reveal in Finder' : 'Reveal in Explorer'
 }
 
+async function copyLocalFileToDir(sourcePath: string, targetDir: string) {
+  await fs.mkdir(targetDir, { recursive: true })
+  const targetPath = path.join(targetDir, path.basename(sourcePath))
+  if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+    return { copied: false, skipped: true, targetPath }
+  }
+  try {
+    await fs.copyFile(sourcePath, targetPath, fsSync.constants.COPYFILE_EXCL)
+    return { copied: true, skipped: false, targetPath }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return { copied: false, skipped: true, targetPath }
+    }
+    throw error
+  }
+}
+
 export function registerIpcHandlers() {
   void initRemoteCache()
   const notifyStatus = (connectionId: string, message: string, kind: 'info' | 'ok' | 'error' = 'info') => {
@@ -764,6 +781,102 @@ export function registerIpcHandlers() {
       return { ok: false, message }
     }
   })
+
+  ipcMain.handle(
+    'workspace:importLocalFiles',
+    async (_event, payload: { targetDir: string; paths: string[] }) => {
+      if (!payload?.targetDir) return { ok: false, message: 'No target folder provided.' }
+      const paths = Array.isArray(payload.paths) ? payload.paths.filter(Boolean) : []
+      if (paths.length === 0) return { ok: false, message: 'No files to import.' }
+      let copied = 0
+      let skipped = 0
+      let failed = 0
+      for (const source of paths) {
+        try {
+          const stat = await fs.stat(source)
+          if (!stat.isFile()) {
+            skipped += 1
+            continue
+          }
+          const result = await copyLocalFileToDir(source, payload.targetDir)
+          if (result.copied) copied += 1
+          else skipped += 1
+        } catch {
+          failed += 1
+        }
+      }
+      const message =
+        failed > 0
+          ? `Imported ${copied} file(s). ${skipped} skipped. ${failed} failed.`
+          : `Imported ${copied} file(s). ${skipped} skipped.`
+      return { ok: failed === 0, message }
+    },
+  )
+
+  ipcMain.handle(
+    'workspace:importRemoteFiles',
+    async (_event, payload: { connectionId: string; targetDir: string; paths: string[] }) => {
+      const connection = (await listConnections()).find((item) => item.id === payload.connectionId)
+      if (!connection) return { ok: false, message: 'Connection not found.' }
+      if (!connection.localRoot) return { ok: false, message: 'Local workspace is not set.' }
+      if (!connection.remoteRoot) return { ok: false, message: 'Remote root is not set.' }
+      if (!payload?.targetDir) return { ok: false, message: 'No target folder provided.' }
+      const normalizedTarget = payload.targetDir.replace(/\\/g, '/')
+      const relative = path.posix.relative(connection.remoteRoot, normalizedTarget)
+      if (relative.startsWith('..')) {
+        return { ok: false, message: 'Target folder is outside the remote root.' }
+      }
+      const localTargetDir = path.join(
+        connection.localRoot,
+        ...relative.split('/').filter(Boolean),
+      )
+      const paths = Array.isArray(payload.paths) ? payload.paths.filter(Boolean) : []
+      if (paths.length === 0) return { ok: false, message: 'No files to import.' }
+
+      let auth: { password?: string; privateKey?: string; passphrase?: string } = {}
+      const authType = connection.authType ?? 'password'
+      if (authType === 'password') {
+        const password = await getPassword(connection.id)
+        if (!password) return { ok: false, message: 'Missing password.' }
+        auth = { password }
+      } else {
+        const privateKey = await getPrivateKey(connection.id)
+        const passphrase = await getPassphrase(connection.id)
+        if (!privateKey) return { ok: false, message: 'Missing private key.' }
+        auth = { privateKey, passphrase: passphrase ?? undefined }
+      }
+
+      let copied = 0
+      let skipped = 0
+      let failed = 0
+      let queued = 0
+      for (const source of paths) {
+        try {
+          const stat = await fs.stat(source)
+          if (!stat.isFile()) {
+            skipped += 1
+            continue
+          }
+          const result = await copyLocalFileToDir(source, localTargetDir)
+          if (!result.copied) {
+            skipped += 1
+            continue
+          }
+          copied += 1
+          suppressPath(connection.id, result.targetPath)
+          await forceUploadFile(connection, auth, result.targetPath)
+          queued += 1
+        } catch {
+          failed += 1
+        }
+      }
+      const message =
+        failed > 0
+          ? `Imported ${copied} file(s). ${skipped} skipped. ${queued} queued. ${failed} failed.`
+          : `Imported ${copied} file(s). ${skipped} skipped. ${queued} queued.`
+      return { ok: failed === 0, message }
+    },
+  )
 
   ipcMain.handle(
     'workspace:showContextMenu',

@@ -55,6 +55,8 @@ interface Window {
       getQueueStatus: (payload: { connectionId: string }) => Promise<unknown | null>
       readFile: (payload: { path: string }) => Promise<{ ok: boolean; message: string; content?: string }>
       writeFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; message: string }>
+      importLocalFiles: (payload: { targetDir: string; paths: string[] }) => Promise<{ ok: boolean; message: string }>
+      importRemoteFiles: (payload: { connectionId: string; targetDir: string; paths: string[] }) => Promise<{ ok: boolean; message: string }>
       openInEditor: (payload: { path: string; codeCommand?: string }) => Promise<{ ok: boolean; message: string }>
       onQueueStatus: (handler: (status: unknown) => void) => () => void
       onStatus: (handler: (status: unknown) => void) => () => void

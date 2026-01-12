@@ -62,6 +62,10 @@ verification (size + hash).
 - Live sync uses mtime comparisons rather than a full diff/merge engine.
 - Column view filters/sorting (name/size/modified).
 - Breadcrumb jump: clicking a parent segment can leave the column view empty even though the folder has contents.
+- Breadcrumb jump still snaps to the connection root when clicking a parent segment; should navigate to the selected parent path instead.
+- Allow split workspace view (local + remote visible at the same time) to enable cross-pane drag/drop workflows.
+- Support drag-and-drop moves within local view and within remote view (drop file/folder onto target folder).
+- Add copy/paste actions in local/remote context menus for moving or duplicating items.
 
 ## Upcoming Plan - Remote Cache Indexing
 - Use incremental diff-merge during initial full index so existing cache entries are preserved. (Done)
@@ -74,6 +78,9 @@ verification (size + hash).
 - Implement the "Rebuild remote index" button in the connection editor and wire it to a full reindex. (Done)
 - Add "Refresh this folder" to the remote context menu, using the force reload path. (Done)
 - Convert initial index to diff-merge updates so existing cache entries are preserved. (Done)
+- Add split workspace mode (local + remote visible together) to allow drag/drop between panes.
+- Add drag/drop for local-to-local and remote-to-remote moves.
+- Add copy/paste actions to the right-click menus for both local and remote items.
 
 ## Next Milestone - Transfer Queue History Panel (Done)
 - Add a dedicated history panel for transfer queue items. (Done)

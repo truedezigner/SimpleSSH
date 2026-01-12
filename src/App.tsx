@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type UIEvent, type DragEvent } from 'react'
 import Editor, { loader, type OnMount } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 
@@ -451,6 +451,7 @@ function App() {
     path: string
     type?: 'file' | 'dir'
   } | null>(null)
+  const [dragOverColumnIndex, setDragOverColumnIndex] = useState<number | null>(null)
 
   const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft>(defaultConnection())
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({})
@@ -1342,27 +1343,32 @@ function App() {
     [remoteSelected, remoteColumns.length],
   )
 
-  const localContext = useMemo(() => {
-    if (!activeConnection || localColumns.length === 0) return null
-    const columnIndex = localActiveColumnIndex
-    const parent = columnIndex > 0 ? localSelected[columnIndex - 1] : null
-    const parentPath = parent?.type === 'dir' ? parent.path : localBasePath || activeConnection.localRoot
-    return { path: parentPath, columnIndex }
-  }, [activeConnection, localColumns.length, localActiveColumnIndex, localSelected, localBasePath])
-
-  const remoteContext = useMemo(() => {
-    if (!activeConnection || remoteColumns.length === 0) return null
-    const columnIndex = remoteActiveColumnIndex
-    const parent = columnIndex > 0 ? remoteSelected[columnIndex - 1] : null
-    const parentPath = parent?.type === 'dir' ? parent.path : remoteBasePath || activeConnection.remoteRoot
-    return { path: parentPath, columnIndex }
-  }, [activeConnection, remoteColumns.length, remoteActiveColumnIndex, remoteSelected, remoteBasePath])
-
   const activeColumnIndex =
     workspaceView === 'local' ? localActiveColumnIndex : remoteActiveColumnIndex
-  const canCreateItem =
-    Boolean(activeConnection) &&
-    ((workspaceView === 'local' && localContext) || (workspaceView === 'remote' && remoteContext))
+
+  const getCreateContextForColumn = (scope: 'local' | 'remote', columnIndex: number) => {
+    if (!activeConnection) return null
+    if (scope === 'local') {
+      if (localColumns.length === 0) return null
+      if (columnIndex === 0) {
+        const root = localBasePath || activeConnection.localRoot
+        if (!root) return null
+        return { path: root, columnIndex }
+      }
+      const parent = localSelected[columnIndex - 1]
+      if (parent?.type !== 'dir') return null
+      return { path: parent.path, columnIndex }
+    }
+    if (remoteColumns.length === 0) return null
+    if (columnIndex === 0) {
+      const root = remoteBasePath || activeConnection.remoteRoot
+      if (!root) return null
+      return { path: root, columnIndex }
+    }
+    const parent = remoteSelected[columnIndex - 1]
+    if (parent?.type !== 'dir') return null
+    return { path: parent.path, columnIndex }
+  }
 
   useEffect(() => {
     setAddMenuColumnIndex(null)
@@ -1371,6 +1377,10 @@ function App() {
   useEffect(() => {
     setCreateDraft(null)
   }, [activeColumnIndex])
+
+  useEffect(() => {
+    setDragOverColumnIndex(null)
+  }, [workspaceView, activeConnectionId, localColumns.length, remoteColumns.length])
 
   useEffect(() => {
     if (!deleteConfirm) return
@@ -1649,6 +1659,59 @@ function App() {
     }
   }
 
+  const handleColumnDragOver = (event: DragEvent<HTMLDivElement>, columnIndex: number) => {
+    if (!activeConnection) return
+    if (!event.dataTransfer?.files?.length) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (dragOverColumnIndex !== columnIndex) {
+      setDragOverColumnIndex(columnIndex)
+    }
+  }
+
+  const handleColumnDragLeave = (event: DragEvent<HTMLDivElement>, columnIndex: number) => {
+    const related = event.relatedTarget as Node | null
+    if (related && event.currentTarget.contains(related)) return
+    if (dragOverColumnIndex === columnIndex) {
+      setDragOverColumnIndex(null)
+    }
+  }
+
+  const handleColumnDrop = async (event: DragEvent<HTMLDivElement>, columnIndex: number) => {
+    event.preventDefault()
+    setDragOverColumnIndex(null)
+    const files = Array.from(event.dataTransfer?.files ?? [])
+      .map((file) => (file as File & { path?: string }).path)
+      .filter(Boolean) as string[]
+    if (files.length === 0) return
+    const context = getCreateContextForColumn(workspaceView, columnIndex)
+    if (!context) return
+    if (workspaceView === 'local') {
+      const result = await window.simpleSSH.workspace.importLocalFiles({
+        targetDir: context.path,
+        paths: files,
+      })
+      if (result?.ok) {
+        setStatusMessage({ kind: 'ok', message: result.message || 'Files added.' })
+        await refreshLocalFolder(context.path, context.columnIndex)
+      } else {
+        setStatusMessage({ kind: 'error', message: result?.message || 'Failed to add files.' })
+      }
+      return
+    }
+    if (!activeConnection) return
+    const result = await window.simpleSSH.workspace.importRemoteFiles({
+      connectionId: activeConnection.id,
+      targetDir: context.path,
+      paths: files,
+    })
+    if (result?.ok) {
+      setStatusMessage({ kind: 'ok', message: result.message || 'Upload queued.' })
+    } else {
+      setStatusMessage({ kind: 'error', message: result?.message || 'Failed to queue upload.' })
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = window.simpleSSH.workspace.onCreateItemPrompt((payload) => {
       if (!payload?.parentPath || !payload.type || !payload.scope) return
@@ -1784,9 +1847,22 @@ function App() {
                   })}
                   </div>
                   <div className='column-grid'>
-                    {(workspaceView === 'local' ? localColumns : remoteColumns).map((column, columnIndex) => (
+                    {(() => {
+                      const visibleColumns = workspaceView === 'local' ? localColumns : remoteColumns
+                      const lastColumnIndex = Math.max(0, visibleColumns.length - 1)
+                      return visibleColumns.map((column, columnIndex) => {
+                      const columnCreateContext = getCreateContextForColumn(workspaceView, columnIndex)
+                      const showColumnActions =
+                        Boolean(columnCreateContext) && columnIndex === lastColumnIndex
+                      return (
                       <div className={`column ${columnIndex > 0 ? 'linked' : ''}`} key={`col-${columnIndex}`}>
-                        <div className='column-list scroll-hide' onScroll={handleScrollVisibility}>
+                        <div
+                          className={`column-list scroll-hide ${dragOverColumnIndex === columnIndex ? 'drop-target' : ''}`}
+                          onScroll={handleScrollVisibility}
+                          onDragOver={(event) => handleColumnDragOver(event, columnIndex)}
+                          onDragLeave={(event) => handleColumnDragLeave(event, columnIndex)}
+                          onDrop={(event) => void handleColumnDrop(event, columnIndex)}
+                        >
                           {createDraft &&
                             createDraft.columnIndex === columnIndex &&
                             createDraft.scope === workspaceView &&
@@ -1886,7 +1962,7 @@ function App() {
                           })}
                           {column.length === 0 && <div className='empty'>Empty</div>}
                         </div>
-                        {columnIndex === activeColumnIndex && canCreateItem && (
+                        {showColumnActions && (
                           <div className='column-actions' ref={addMenuRef}>
                             <button
                               className='ghost small column-action'
@@ -1902,14 +1978,13 @@ function App() {
                                 <button
                                   className='ghost small'
                                   onClick={() => {
-                                    if (!activeConnection) return
-                                    if (workspaceView === 'local') {
-                                      if (!localContext) return
-                                      beginCreateDraft('local', 'file', localContext.path, localContext.columnIndex)
-                                    } else {
-                                      if (!remoteContext) return
-                                      beginCreateDraft('remote', 'file', remoteContext.path, remoteContext.columnIndex)
-                                    }
+                                    if (!columnCreateContext) return
+                                    beginCreateDraft(
+                                      workspaceView,
+                                      'file',
+                                      columnCreateContext.path,
+                                      columnCreateContext.columnIndex,
+                                    )
                                   }}
                                 >
                                   New File
@@ -1917,14 +1992,13 @@ function App() {
                                 <button
                                   className='ghost small'
                                   onClick={() => {
-                                    if (!activeConnection) return
-                                    if (workspaceView === 'local') {
-                                      if (!localContext) return
-                                      beginCreateDraft('local', 'dir', localContext.path, localContext.columnIndex)
-                                    } else {
-                                      if (!remoteContext) return
-                                      beginCreateDraft('remote', 'dir', remoteContext.path, remoteContext.columnIndex)
-                                    }
+                                    if (!columnCreateContext) return
+                                    beginCreateDraft(
+                                      workspaceView,
+                                      'dir',
+                                      columnCreateContext.path,
+                                      columnCreateContext.columnIndex,
+                                    )
                                   }}
                                 >
                                   New Folder
@@ -1934,7 +2008,8 @@ function App() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    )})
+                    })()}
                     {(workspaceView === 'local' ? localColumns : remoteColumns).length === 0 && (
                       <div className='empty'>
                         <div>No items loaded yet.</div>
