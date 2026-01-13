@@ -86,6 +86,29 @@ export function registerIpcHandlers() {
     return listConnections()
   })
 
+  ipcMain.handle('window:minimize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    window?.minimize()
+    return true
+  })
+
+  ipcMain.handle('window:toggleMaximize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return false
+    if (window.isMaximized()) {
+      window.unmaximize()
+    } else {
+      window.maximize()
+    }
+    return true
+  })
+
+  ipcMain.handle('window:close', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    window?.close()
+    return true
+  })
+
   ipcMain.handle(
     'connections:upsert',
     async (_event, payload: { connection: any; password?: string; privateKey?: string; passphrase?: string }) => {

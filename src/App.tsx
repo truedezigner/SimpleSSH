@@ -459,6 +459,7 @@ function App() {
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null)
+  const [breadcrumbSearchOpen, setBreadcrumbSearchOpen] = useState(false)
   const [builtInEditorPath, setBuiltInEditorPath] = useState<string | null>(null)
   const [builtInEditorName, setBuiltInEditorName] = useState('')
   const [builtInEditorContent, setBuiltInEditorContent] = useState('')
@@ -534,6 +535,7 @@ function App() {
   const addMenuRef = useRef<HTMLDivElement | null>(null)
   const createDraftInputRef = useRef<HTMLInputElement | null>(null)
   const renameDraftInputRef = useRef<HTMLInputElement | null>(null)
+  const breadcrumbSearchInputRef = useRef<HTMLInputElement | null>(null)
   const builtInEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
 
   useEffect(() => {
@@ -1807,6 +1809,52 @@ function App() {
           <button className='ghost' onClick={() => setDrawerOpen((prev) => !prev)}>
             Connections
           </button>
+          <div className='window-controls'>
+            <button
+              type='button'
+              className='window-control'
+              aria-label='Minimize'
+              onClick={() => void window.simpleSSH.window.minimize()}
+            >
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path d='M6 12h12' stroke='currentColor' strokeWidth='2' strokeLinecap='round' />
+              </svg>
+            </button>
+            <button
+              type='button'
+              className='window-control'
+              aria-label='Maximize'
+              onClick={() => void window.simpleSSH.window.toggleMaximize()}
+            >
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <rect
+                  x='6.5'
+                  y='6.5'
+                  width='11'
+                  height='11'
+                  rx='2'
+                  stroke='currentColor'
+                  strokeWidth='2'
+                  fill='none'
+                />
+              </svg>
+            </button>
+            <button
+              type='button'
+              className='window-control close'
+              aria-label='Close'
+              onClick={() => void window.simpleSSH.window.close()}
+            >
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path
+                  d='M7 7l10 10M17 7l-10 10'
+                  stroke='currentColor'
+                  strokeWidth='2'
+                  strokeLinecap='round'
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1821,30 +1869,65 @@ function App() {
               <div className='workspace-tree column-view'>
                 <div className='column-shell'>
                   <div className='breadcrumb-bar'>
-                  {breadcrumbSegments.length === 0 && <span className='breadcrumb-label'>No path selected</span>}
-                  {breadcrumbSegments.map((segment, index) => {
-                    const isCurrent = index === breadcrumbSegments.length - 1
-                    return (
-                      <button
-                        type='button'
-                        className='breadcrumb-seg'
-                        key={`${segment}-${index}`}
-                        onClick={() => {
-                          const target = breadcrumbPaths[index]
-                          if (!target || isCurrent) return
-                          if (workspaceView === 'remote') {
-                            void navigateToRemotePath(target)
-                          } else {
-                            void navigateToLocalPath(target)
-                          }
-                        }}
-                        disabled={isCurrent}
-                        aria-label={`Open ${segment}`}
-                      >
-                        <span className='breadcrumb-label'>{segment}</span>
-                      </button>
-                    )
-                  })}
+                    <div className='breadcrumb-trail'>
+                      {breadcrumbSegments.length === 0 && (
+                        <span className='breadcrumb-label'>No path selected</span>
+                      )}
+                      {breadcrumbSegments.map((segment, index) => {
+                        const isCurrent = index === breadcrumbSegments.length - 1
+                        return (
+                          <button
+                            type='button'
+                            className='breadcrumb-seg'
+                            key={`${segment}-${index}`}
+                            onClick={() => {
+                              const target = breadcrumbPaths[index]
+                              if (!target || isCurrent) return
+                              if (workspaceView === 'remote') {
+                                void navigateToRemotePath(target)
+                              } else {
+                                void navigateToLocalPath(target)
+                              }
+                            }}
+                            disabled={isCurrent}
+                            aria-label={`Open ${segment}`}
+                          >
+                            <span className='breadcrumb-label'>{segment}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div className='breadcrumb-actions'>
+                      <div className={`breadcrumb-search ${breadcrumbSearchOpen ? 'open' : ''}`}>
+                        <button
+                          type='button'
+                          className='breadcrumb-search-button'
+                          aria-label='Search files'
+                          onClick={() => {
+                            setBreadcrumbSearchOpen(true)
+                            requestAnimationFrame(() => {
+                              breadcrumbSearchInputRef.current?.focus()
+                            })
+                          }}
+                        >
+                          <svg viewBox='0 0 24 24' aria-hidden='true'>
+                            <circle cx='11' cy='11' r='6.5' stroke='currentColor' strokeWidth='2' fill='none' />
+                            <path d='M16 16l4.5 4.5' stroke='currentColor' strokeWidth='2' strokeLinecap='round' />
+                          </svg>
+                        </button>
+                        <input
+                          ref={breadcrumbSearchInputRef}
+                          type='text'
+                          placeholder='Search files (coming soon)'
+                          onFocus={() => setBreadcrumbSearchOpen(true)}
+                          onBlur={(event) => {
+                            if (!event.currentTarget.value) {
+                              setBreadcrumbSearchOpen(false)
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                   <div className='column-grid'>
                     {(() => {

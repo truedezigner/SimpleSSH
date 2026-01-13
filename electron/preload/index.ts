@@ -145,6 +145,11 @@ contextBridge.exposeInMainWorld('simpleSSH', {
       return () => ipcRenderer.removeListener('workspace:remoteRefresh', listener)
     },
   },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+  },
 })
 
 // --------- Preload scripts loading ---------

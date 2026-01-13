@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, Menu } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -53,7 +53,9 @@ async function createWindow() {
     height: 820,
     minWidth: 1100,
     minHeight: 720,
+    backgroundColor: '#0a071c',
     icon: path.join(process.env.VITE_PUBLIC, 'favicon.ico'),
+    frame: false,
     webPreferences: {
       preload,
       // Warning: Enable nodeIntegration and disable contextIsolation is not secure in production
@@ -88,7 +90,10 @@ async function createWindow() {
   update(win)
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+  void createWindow()
+})
 
 app.on('window-all-closed', () => {
   win = null

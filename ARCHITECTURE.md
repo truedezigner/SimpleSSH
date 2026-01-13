@@ -10,6 +10,7 @@ status feedback.
 Renderer (React UI)
   - Connections list + editor (per-connection options like remote-first + folders-first)
   - Workspace column file explorer with badges + inline create/rename/delete
+  - Custom window controls (frameless window chrome)
   - Top bar actions (sync, force push, auto sync, reload)
   - Bottom status bar (connection, roots, sync, queue) + transfer history popup
   - Built-in code editor panel (planned)
@@ -29,12 +30,13 @@ Main (Electron/Node)
 ### Main Process
 - Store connection metadata in a JSON file under app userData.
 - Store secrets (passwords/private keys) in OS keychain via keytar.
-- Provide IPC handlers for:
+  - Provide IPC handlers for:
   - Connection CRUD + password access.
   - Test connection (SSH + SFTP readdir).
   - Workspace selection, sync, remote list/download, and local scan.
   - Auto-upload watcher with queue + verification, plus live sync polling.
   - Import/export connections (metadata only).
+  - Window controls (minimize, toggle maximize, close).
 
 ### Renderer
 - List, add, edit, and delete connections.

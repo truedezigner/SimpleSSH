@@ -88,5 +88,10 @@ interface Window {
       onDeleteItemPrompt: (handler: (payload: { scope: 'local' | 'remote'; path: string; type?: 'file' | 'dir' }) => void) => () => void
       onRemoteRefresh: (handler: (payload: { connectionId: string; remotePath: string }) => void) => () => void
     }
+    window: {
+      minimize: () => Promise<boolean>
+      toggleMaximize: () => Promise<boolean>
+      close: () => Promise<boolean>
+    }
   }
 }
