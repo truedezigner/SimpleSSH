@@ -1273,7 +1273,7 @@ function App() {
     let sorted = sortNodes((nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
     columns.push(sorted)
 
-    for (let index = 1; index < parts.length; index += 1) {
+    for (let index = 0; index < parts.length; index += 1) {
       const next = parts[index]
       const expectedPath = `${currentPath.replace(/[\\/]+$/, '')}\\${next}`
       const match =
@@ -1311,7 +1311,7 @@ function App() {
     let sorted = sortNodes((response?.nodes ?? []) as FileNode[], { foldersFirst: activeConnection.foldersFirst })
     columns.push(sorted)
 
-    for (let index = 1; index < parts.length; index += 1) {
+    for (let index = 0; index < parts.length; index += 1) {
       const next = parts[index]
       const expectedPath = currentPath === '/' ? `/${next}` : `${currentPath}/${next}`
       const match =
