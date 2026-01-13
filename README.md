@@ -27,6 +27,7 @@ previews the local workspace tree. Upload queue and verification are built in.
 - Import/export of connection metadata.
 - Frameless window with in-app window controls.
 - Breadcrumb bar search placeholder (expand-on-click).
+- Column view horizontal scrolling restored with sticky breadcrumb search.
 
 ## Planned Features
 - Built-in code editor panel with per-connection preferences.
@@ -52,4 +53,3 @@ npm run build:mac
 ## Known Gaps
 - Live sync is mtime-based (no full content diff/merge).
 - Column view filters/sorting (name/size/modified).
-- TODO: Remote/Local tabs need to return to the original workspace bar position.

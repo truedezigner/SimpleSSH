@@ -63,7 +63,6 @@ verification (size + hash).
 - Column view filters/sorting (name/size/modified).
 - Breadcrumb jump: clicking a parent segment can leave the column view empty even though the folder has contents.
 - Breadcrumb jump still snaps to the connection root when clicking a parent segment; should navigate to the selected parent path instead.
-- TODO: Move the Remote/Local tabs back to the original workspace bar position.
 - Allow split workspace view (local + remote visible at the same time) to enable cross-pane drag/drop workflows.
 - Support drag-and-drop moves within local view and within remote view (drop file/folder onto target folder).
 - Add copy/paste actions in local/remote context menus for moving or duplicating items.
