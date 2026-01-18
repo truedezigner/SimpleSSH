@@ -56,7 +56,6 @@ Then right-click the Desktop shortcut "SimpleSSH (Dev)" and choose Pin to taskba
 If the icon does not update, unpin and re-pin, then restart the dev server.
 If the running app still shows the old icon, clear the Windows icon cache and restart.
 If you add `assets/icons/app-256.png`, run `npm run make:ico` to regenerate `assets/icons/app.ico`.
-
 ## Build
 ```
 npm run build:win

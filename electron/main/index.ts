@@ -60,7 +60,6 @@ function resolveWindowsIconPath() {
   const appRoot = process.env.APP_ROOT ?? path.join(__dirname, '../..')
   return path.join(appRoot, iconRelative)
 }
-
 async function createWindow() {
   win = new BrowserWindow({
     title: 'SimpleSSH',

@@ -10,6 +10,7 @@
     "dist-electron",
     "dist",
     "assets/icons"
+    "dist"
   ],
   "mac": {
     "artifactName": "${productName}_${version}.${ext}",

@@ -6,7 +6,6 @@ Note: This file is upstream template text. SimpleSSH-specific docs live in READM
 - Windows: double-click `simpleSSH-dev.cmd` in the repo root.
 - macOS: run `chmod +x simpleSSH-dev.command` then `./simpleSSH-dev.command`.
 - Windows taskbar shortcut: run `npm run make:dev-shortcut`, then right-click the Desktop shortcut and pin it.
-
 [![awesome-vite](https://awesome.re/mentioned-badge.svg)](https://github.com/vitejs/awesome-vite)
 ![GitHub stars](https://img.shields.io/github/stars/caoxiemeihao/vite-react-electron?color=fa6470)
 ![GitHub issues](https://img.shields.io/github/issues/caoxiemeihao/vite-react-electron?color=d8b22d)
