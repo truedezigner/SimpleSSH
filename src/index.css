@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Space Grotesk', 'Trebuchet MS', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #e8e5ff;
+  background-color: #0a071c;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 10% 20%, rgba(131, 84, 255, 0.55), transparent 45%),
+    radial-gradient(circle at 90% 10%, rgba(73, 210, 255, 0.4), transparent 45%),
+    radial-gradient(circle at 80% 90%, rgba(255, 126, 214, 0.45), transparent 50%),
+    linear-gradient(140deg, #0a071c 0%, #130d34 45%, #1c1142 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: absolute;
+  inset: -20% -10%;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.15;
+  pointer-events: none;
+  animation: drift 24s linear infinite;
+}
+
+body::after {
+  inset: -30% -20%;
+  opacity: 0.1;
+  animation-duration: 32s;
+}
+
+a {
+  color: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(40px, 60px, 0);
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.truedezigner.simplessh",
+  "asar": true,
+  "icon": "assets/icons/app.ico",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "dist-electron",
+    "dist",
+    "assets/icons"
+  ],
+  "mac": {
+    "artifactName": "${productName}_${version}.${ext}",
+    "target": [
+      "dmg",
+      "zip"
+    ]
+  },
+  "win": {
+    "target": [
+      "portable"
+    ],
+    "artifactName": "${productName}_${version}.${ext}"
+  }
+}
